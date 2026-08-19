@@ -1,0 +1,29 @@
+[
+  {
+    "name": "LivePiano 2024",
+    "date": "2024-05-15",
+    "status": "active",
+    "criteria": [
+      { "name": "Technicality", "maxScore": 10 },
+      { "name": "Expression", "maxScore": 10 },
+      { "name": "Stage Presence", "maxScore": 5 }
+    ],
+    "judges": [
+      { "id": "judge1", "name": "Alice Keys", "role": "Lead Judge" },
+      { "id": "judge2", "name": "Bob Scales" }
+    ]
+  },
+  {
+    "name": "Summer Sing-Off",
+    "date": "2024-06-20",
+    "status": "upcoming",
+    "criteria": [
+      { "name": "Vocal Range", "maxScore": 10 },
+      { "name": "Tone", "maxScore": 10 }
+    ],
+    "judges": [
+      { "id": "j1", "name": "Simon" },
+      { "id": "j2", "name": "Katy" }
+    ]
+  }
+]
