@@ -155,6 +155,13 @@ export default function AdminDashboardPage() {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl mb-8">
           <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
             <h2 className="font-bold text-base text-white">Event Registry</h2>
+            <Link
+              href="/admin/create"
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
+            >
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>Create Event</span>
+            </Link>
           </div>
 
           {competitions.length === 0 ? (
