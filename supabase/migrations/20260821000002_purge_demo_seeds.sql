@@ -1,6 +1,6 @@
 -- ============================================================================
--- COMPREHENSIVE SAFE PURGE OF DEMO & PRACTICE DATA
--- Deletes all dependent rows across all 25+ schema tables in reverse FK order
+-- ACCURATE & SAFE PURGE OF DEMO / PRACTICE DATA
+-- Aligned with exact schema table structures and foreign key columns
 -- ============================================================================
 
 DO $$
@@ -17,14 +17,14 @@ DECLARE
   demo_team_ids UUID[];
   demo_part_ids UUID[];
 BEGIN
-  -- 1. Identify Demo Competition IDs
+  -- 1. Identify Demo Competitions
   SELECT COALESCE(ARRAY_AGG(id), ARRAY[]::UUID[]) INTO demo_comp_ids
   FROM public.competitions 
   WHERE environment = 'practice' 
      OR name ILIKE '%practice%' 
      OR name ILIKE '%demo%';
 
-  -- 2. Identify Demo Category IDs
+  -- 2. Identify Demo Categories
   SELECT COALESCE(ARRAY_AGG(id), ARRAY[]::UUID[]) INTO demo_cat_ids
   FROM public.categories 
   WHERE name ILIKE '%demo%' 
@@ -51,7 +51,7 @@ BEGIN
 
   SELECT COALESCE(ARRAY_AGG(id), ARRAY[]::UUID[]) INTO demo_award_ids
   FROM public.awards
-  WHERE competition_id = ANY(demo_comp_ids);
+  WHERE competition_id = ANY(demo_comp_ids) OR categoryId = ANY(demo_cat_ids);
 
   -- 5. Identify Demo Participants & Teams
   SELECT COALESCE(ARRAY_AGG(id), ARRAY[]::UUID[]) INTO demo_part_ids
@@ -82,25 +82,26 @@ BEGIN
      OR criteria_version_id = ANY(demo_crit_ver_ids);
 
   -- ===========================================================================
-  -- PHASE 1: LEAF TABLES (ENTRIES, SESSIONS, TIMERS, TIE BREAKERS, SCORES)
+  -- PHASE 1: LEAF ENTRIES & DECISIONS
   -- ===========================================================================
   DELETE FROM public.score_entries WHERE submission_id = ANY(demo_sub_ids);
   DELETE FROM public.score_history WHERE submission_id = ANY(demo_sub_ids);
+
+  DELETE FROM public.tie_break_decisions 
+  WHERE result_entry_id IN (
+    SELECT id FROM public.result_entries 
+    WHERE result_id = ANY(demo_result_ids) OR performance_id = ANY(demo_perf_ids)
+  );
+
   DELETE FROM public.result_entries 
   WHERE result_id = ANY(demo_result_ids) 
-     OR performance_id = ANY(demo_perf_ids)
-     OR participant_id = ANY(demo_part_ids)
-     OR team_id = ANY(demo_team_ids);
+     OR performance_id = ANY(demo_perf_ids);
 
   DELETE FROM public.award_winners
   WHERE award_id = ANY(demo_award_ids)
+     OR performance_id = ANY(demo_perf_ids)
      OR participant_id = ANY(demo_part_ids)
      OR team_id = ANY(demo_team_ids);
-
-  DELETE FROM public.tie_break_decisions
-  WHERE rule_id = ANY(demo_rule_ids)
-     OR result_id = ANY(demo_result_ids)
-     OR performance_id = ANY(demo_perf_ids);
 
   DELETE FROM public.scores 
   WHERE event_id = ANY(demo_comp_ids) 
@@ -128,7 +129,7 @@ BEGIN
   DELETE FROM public.performances WHERE id = ANY(demo_perf_ids);
 
   -- ===========================================================================
-  -- PHASE 3: ROUNDS, TEAMS, TEAM MEMBERS, PARTICIPANTS, CATEGORIES
+  -- PHASE 3: TEAM MEMBERS, TEAMS, PARTICIPANTS, ROUNDS, CATEGORIES
   -- ===========================================================================
   DELETE FROM public.team_members 
   WHERE team_id = ANY(demo_team_ids) 
@@ -136,7 +137,6 @@ BEGIN
 
   DELETE FROM public.teams WHERE id = ANY(demo_team_ids);
 
-  -- Clear active participant references in event_state before deleting participants
   UPDATE public.event_state 
   SET active_participant_id = NULL 
   WHERE active_participant_id = ANY(demo_part_ids) OR event_id = ANY(demo_comp_ids);
