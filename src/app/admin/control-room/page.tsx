@@ -54,8 +54,12 @@ export default function LiveControlRoomPage() {
     async function loadCategories() {
       const { data } = await supabase.from('categories').select('*').order('display_order');
       if (data && data.length > 0) {
-        setCategories(data as any);
-        setSelectedCategory(data[0] as any);
+        const mappedCategories = data.map(c => ({
+          ...c,
+          performerType: c.performer_type
+        }));
+        setCategories(mappedCategories as any);
+        setSelectedCategory(mappedCategories[0] as any);
       }
     }
     loadCategories();
