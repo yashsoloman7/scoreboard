@@ -118,8 +118,8 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 7. RBAC HELPER FUNCTIONS (Security Definer)
-CREATE OR REPLACE FUNCTION public.check_user_has_role(req_user_id UUID, req_role app_role_enum)
+-- 7. RBAC HELPER FUNCTIONS (Security Definer using TEXT comparison to prevent SQLSTATE 55P04 enum transaction lock)
+CREATE OR REPLACE FUNCTION public.check_user_has_role(req_user_id UUID, req_role TEXT)
 RETURNS BOOLEAN
 LANGUAGE sql
 SECURITY DEFINER
@@ -130,10 +130,10 @@ AS $$
         SELECT 1 FROM public.user_roles
         WHERE user_id = req_user_id
           AND (
-            role = req_role
-            OR (req_role = 'admin' AND role = 'super_admin')
-            OR (req_role = 'event_manager' AND role IN ('super_admin', 'admin', 'event_operator'))
-            OR (req_role = 'judge' AND role IN ('super_admin', 'admin', 'judge'))
+            role::TEXT = req_role
+            OR (req_role = 'admin' AND role::TEXT = 'super_admin')
+            OR (req_role = 'event_manager' AND role::TEXT IN ('super_admin', 'admin', 'event_operator', 'event_manager'))
+            OR (req_role = 'judge' AND role::TEXT IN ('super_admin', 'admin', 'judge'))
           )
     );
 $$;
