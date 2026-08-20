@@ -1,6 +1,6 @@
 -- ============================================================================
--- ACCURATE & SAFE PURGE OF DEMO / PRACTICE DATA
--- Aligned with exact schema table structures and foreign key columns
+-- VERIFIED PURGE OF ALL DEMO / PRACTICE DATA
+-- Exact Schema Column Alignment for PostgreSQL
 -- ============================================================================
 
 DO $$
@@ -51,14 +51,14 @@ BEGIN
 
   SELECT COALESCE(ARRAY_AGG(id), ARRAY[]::UUID[]) INTO demo_award_ids
   FROM public.awards
-  WHERE competition_id = ANY(demo_comp_ids) OR categoryId = ANY(demo_cat_ids);
+  WHERE competition_id = ANY(demo_comp_ids) OR "categoryId" = ANY(demo_cat_ids);
 
   -- 5. Identify Demo Participants & Teams
   SELECT COALESCE(ARRAY_AGG(id), ARRAY[]::UUID[]) INTO demo_part_ids
   FROM public.participants
   WHERE environment = 'practice' 
      OR participant_name ILIKE '%demo%' 
-     OR team_name ILIKE '%demo%'
+     OR team_name ILIKE '%demo%' 
      OR church_name ILIKE '%demo%'
      OR competition_id = ANY(demo_comp_ids);
 
@@ -82,7 +82,7 @@ BEGIN
      OR criteria_version_id = ANY(demo_crit_ver_ids);
 
   -- ===========================================================================
-  -- PHASE 1: LEAF ENTRIES & DECISIONS
+  -- PHASE 1: LEAF TABLES (ENTRIES, TIMERS, DECISIONS, SESSIONS, ASSIGNMENTS)
   -- ===========================================================================
   DELETE FROM public.score_entries WHERE submission_id = ANY(demo_sub_ids);
   DELETE FROM public.score_history WHERE submission_id = ANY(demo_sub_ids);
@@ -108,13 +108,14 @@ BEGIN
      OR participant_id = ANY(demo_part_ids);
 
   DELETE FROM public.timers 
-  WHERE performance_id = ANY(demo_perf_ids) 
-     OR competition_id = ANY(demo_comp_ids);
+  WHERE performance_id = ANY(demo_perf_ids);
 
-  DELETE FROM public.judge_sessions WHERE performance_id = ANY(demo_perf_ids);
+  DELETE FROM public.judge_sessions 
+  WHERE competition_id = ANY(demo_comp_ids);
+
   DELETE FROM public.judge_assignments 
-  WHERE category_id = ANY(demo_cat_ids) 
-     OR round_id = ANY(demo_round_ids);
+  WHERE competition_id = ANY(demo_comp_ids) 
+     OR category_id = ANY(demo_cat_ids);
 
   -- ===========================================================================
   -- PHASE 2: SUBMISSIONS, CRITERIA, PERFORMANCES, RESULTS & AWARDS
@@ -125,6 +126,11 @@ BEGIN
   DELETE FROM public.results WHERE id = ANY(demo_result_ids);
   DELETE FROM public.tie_break_rules WHERE id = ANY(demo_rule_ids);
   DELETE FROM public.awards WHERE id = ANY(demo_award_ids);
+
+  -- Break circular FKs in competition_state before deleting performances/categories
+  UPDATE public.competition_state 
+  SET active_category_id = NULL, active_round_id = NULL, active_performance_id = NULL 
+  WHERE competition_id = ANY(demo_comp_ids);
 
   DELETE FROM public.performances WHERE id = ANY(demo_perf_ids);
 
