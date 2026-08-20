@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { updateParticipantDetails, deleteParticipant } from '@/actions/participants';
+import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { 
   Play, 
   Pause, 
@@ -241,14 +242,35 @@ export function EventManagerController({ eventId }: { eventId: string }) {
     }
   };
 
-  const handleDeletePerformer = async (id: string, name: string) => {
-    if (!confirm(`Are you sure you want to remove "${name}" from the staging queue?`)) return;
-    try {
-      await deleteParticipant(id);
-      await loadData();
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Failed to delete participant');
-    }
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel: string;
+    variant: 'danger' | 'warning' | 'primary';
+    action: () => Promise<void>;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmLabel: 'Yes, Proceed',
+    variant: 'danger',
+    action: async () => {},
+  });
+
+  const handleDeletePerformer = (id: string, name: string) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Remove Performer Confirmation',
+      message: `Are you sure you want to remove "${name}" from the staging queue?`,
+      confirmLabel: 'Yes, Remove Performer',
+      variant: 'danger',
+      action: async () => {
+        await deleteParticipant(id);
+        setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+        await loadData();
+      },
+    });
   };
 
   const formatSeconds = (sec: number) => {
@@ -604,6 +626,17 @@ export function EventManagerController({ eventId }: { eventId: string }) {
           </div>
         </div>
       )}
+
+      {/* Reusable Confirmation Dialog */}
+      <ConfirmationDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.action}
+        onCancel={() => setConfirmDialog((prev) => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

@@ -24,6 +24,7 @@ import {
 } from '@/lib/importers/participantImporter';
 import { importParticipantsBulk } from '@/actions/participants';
 import { supabase } from '@/lib/supabase/client';
+import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 
 interface GoogleFormSheetImporterProps {
   competitionId: string;
@@ -36,10 +37,10 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
   const [sheetUrl, setSheetUrl] = useState('');
   const [rawRegistrations, setRawRegistrations] = useState<GoogleFormChurchRegistration[]>([]);
   const [generatedActs, setGeneratedActs] = useState<ParsedParticipantRow[]>([]);
-  const [expandThreeActs, setExpandThreeActs] = useState(true);
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importStatus, setImportStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   // Process raw text or CSV
   const handleProcessText = (content: string) => {
@@ -105,9 +106,9 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
   const handleCommitImport = async () => {
     if (generatedActs.length === 0 || importing) return;
     setImporting(true);
+    setShowConfirmModal(false);
 
     try {
-      // Resolve or get default category and round for the competition
       const { data: cat } = await supabase
         .from('categories')
         .select('id, rounds(id)')
@@ -149,14 +150,14 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
         <div>
           <div className="flex items-center gap-3">
             <h2 className="text-2xl sm:text-3xl font-black bg-gradient-to-r from-cyan-400 via-teal-300 to-emerald-400 bg-clip-text text-transparent">
-              Google Form & CSV Data Importer
+              Sheet & CSV Data Importer
             </h2>
             <span className="px-3 py-1 text-xs font-bold rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">
-              Form Schema Verified
+              Multi-Instrument Parser
             </span>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            Seamlessly import Church Registrations, Soloists, Duet Pairs, Choir Leaders, and Instrumentalists.
+            Supports exact sheet format: Sno, Church Name, Solo, Duet, Guitar, Electric, Bass, Octopad/Drums, Keyboard, Dholak, Harmonium, Tabla, Clap Box, Saxophone, Basuri.
           </p>
         </div>
 
@@ -193,9 +194,9 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
       {importMode === 'upload' && (
         <div className="border-2 border-dashed border-slate-700 hover:border-cyan-500 rounded-3xl p-8 text-center transition-all bg-slate-950/50 group">
           <FileSpreadsheet className="w-12 h-12 text-cyan-400 mx-auto mb-3 group-hover:scale-110 transition-transform" />
-          <h3 className="text-base font-bold text-white mb-1">Select or Drag Google Form CSV File</h3>
+          <h3 className="text-base font-bold text-white mb-1">Select or Drag CSV File</h3>
           <p className="text-xs text-slate-400 max-w-md mx-auto mb-4">
-            Supports exported Google Sheets responses (.csv) containing CHURCH NAME, SOLO, DUET, and INSTRUMENT fields.
+            Supports exported CSV from Google Sheets / Excel containing Church Name, Solo, Duet, and individual instrument columns.
           </p>
           <label className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold shadow-lg shadow-cyan-950 cursor-pointer transition-all">
             <Upload className="w-4 h-4" />
@@ -228,7 +229,7 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
             </button>
           </div>
           <p className="text-[11px] text-slate-500">
-            Note: In Google Sheets, make sure the sheet is shared as <strong>"Anyone with the link can view"</strong>.
+            Make sure your Google Sheet is shared as <strong>"Anyone with the link can view"</strong>.
           </p>
         </div>
       )}
@@ -249,7 +250,7 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
           </div>
           <textarea
             rows={5}
-            placeholder={`Timestamp\tEmail Address\tCHURCH NAME\tPASTOR/ FATHER NAME\tCHOIR LEADER NAME\tSOLO PARTICPANT NAME\tDUET PARTICPANT NAME 1\tDUET PARTICPANT NAME 2\tTOTAL INSTRUMENT PLAYER WITH INSTRUMENT NAME\tNO. OF PARTICPANTS\tNO. Of EXTRA PERSON`}
+            placeholder={`Sno.\tChurch Name\tSolo Name\tDuet Name\tGuitar\tElectric Guitar\tBass Guitar\tOctopad/Drums\tKeyboard\tDholak\tHarmonium\tTabla / Naal\tClap Box\tSaxophone\tBasuri`}
             value={pastedData}
             onChange={(e) => setPastedData(e.target.value)}
             className="w-full p-4 bg-slate-900 border border-slate-800 rounded-2xl text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-500"
@@ -267,17 +268,17 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
                 Parsed Registrations Preview ({rawRegistrations.length} Churches • {generatedActs.length} Scheduled Acts)
               </h3>
               <p className="text-xs text-slate-400">
-                Each church submission is automatically divided into Solo, Duet, and Group acts with tagged instrumentalists.
+                Each church submission generates Solo, Duet, and Group Choir acts with tagged instrumentalists.
               </p>
             </div>
 
             <button
-              onClick={handleCommitImport}
+              onClick={() => setShowConfirmModal(true)}
               disabled={importing || generatedActs.length === 0}
-              className="px-6 py-3.5 rounded-2xl font-black text-sm bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-slate-950 shadow-xl shadow-emerald-950 disabled:opacity-40 flex items-center gap-2 transition-all active:scale-95"
+              className="px-6 py-3.5 rounded-2xl font-black text-sm bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-slate-950 shadow-xl shadow-emerald-950 disabled:opacity-40 flex items-center gap-2 transition-all active:scale-95 cursor-pointer"
             >
               <Database className="w-4 h-4" />
-              {importing ? 'Importing Acts...' : `1-Click Import ${generatedActs.length} Acts into Event`}
+              <span>Import {generatedActs.length} Acts into Event</span>
             </button>
           </div>
 
@@ -296,22 +297,21 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-800 bg-slate-900/80 text-slate-400 uppercase font-extrabold">
-                  <th className="py-3 px-4">#</th>
-                  <th className="py-3 px-4">Church & Pastor</th>
-                  <th className="py-3 px-4">Solo Performer</th>
-                  <th className="py-3 px-4">Duet Performers</th>
-                  <th className="py-3 px-4">Choir Leader & Size</th>
-                  <th className="py-3 px-4">Special Instrumentalists</th>
+                  <th className="py-3 px-4">Sno</th>
+                  <th className="py-3 px-4">Church Name</th>
+                  <th className="py-3 px-4">Solo Name</th>
+                  <th className="py-3 px-4">Duet Name</th>
+                  <th className="py-3 px-4">Guitars (Lead/Elec/Bass)</th>
+                  <th className="py-3 px-4">Keys / Harmonium</th>
+                  <th className="py-3 px-4">Rhythm (Drums/Dholak/Tabla/Cajon)</th>
+                  <th className="py-3 px-4">Winds (Sax/Flute)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-medium">
                 {rawRegistrations.map((reg, idx) => (
                   <tr key={idx} className="hover:bg-slate-900/40">
-                    <td className="py-3 px-4 font-mono font-bold text-cyan-400">{idx + 1}</td>
-                    <td className="py-3 px-4">
-                      <div className="font-bold text-white">{reg.churchName}</div>
-                      {reg.pastorName && <div className="text-[11px] text-slate-400">Pastor: {reg.pastorName}</div>}
-                    </td>
+                    <td className="py-3 px-4 font-mono font-bold text-cyan-400">#{reg.performanceOrder || idx + 1}</td>
+                    <td className="py-3 px-4 font-bold text-white">{reg.churchName}</td>
                     <td className="py-3 px-4">
                       {reg.soloParticipantName ? (
                         <span className="font-semibold text-emerald-300">{reg.soloParticipantName}</span>
@@ -320,35 +320,34 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
                       )}
                     </td>
                     <td className="py-3 px-4">
-                      {reg.duetParticipant1 || reg.duetParticipant2 ? (
-                        <span className="font-semibold text-teal-300">
-                          {[reg.duetParticipant1, reg.duetParticipant2].filter(Boolean).join(' & ')}
-                        </span>
+                      {reg.duetParticipant1 ? (
+                        <span className="font-semibold text-teal-300">{reg.duetParticipant1}</span>
                       ) : (
                         <span className="text-slate-600">—</span>
                       )}
                     </td>
-                    <td className="py-3 px-4">
-                      <div>
-                        <span className="font-semibold text-indigo-300">{reg.choirLeaderName || 'Church Choir'}</span>
-                        {reg.numberOfParticipants && (
-                          <span className="ml-1 text-[10px] text-slate-400">({reg.numberOfParticipants} members)</span>
-                        )}
-                      </div>
+                    <td className="py-3 px-4 space-y-0.5 text-[11px]">
+                      {reg.guitarist && <div className="text-purple-300">🎸 Acou: {reg.guitarist}</div>}
+                      {reg.electricGuitarist && <div className="text-purple-300">⚡ Elec: {reg.electricGuitarist}</div>}
+                      {reg.bassGuitarist && <div className="text-purple-300">🎸 Bass: {reg.bassGuitarist}</div>}
+                      {!reg.guitarist && !reg.electricGuitarist && !reg.bassGuitarist && <span className="text-slate-600">—</span>}
                     </td>
-                    <td className="py-3 px-4 space-y-0.5">
-                      {reg.bestKeyboardist && (
-                        <div className="text-[11px] text-amber-300">🎹 Keys: {reg.bestKeyboardist}</div>
-                      )}
-                      {reg.bestRhythmist && (
-                        <div className="text-[11px] text-rose-300">🥁 Rhythm: {reg.bestRhythmist}</div>
-                      )}
-                      {reg.bestGuitarist && (
-                        <div className="text-[11px] text-purple-300">🎸 Guitar: {reg.bestGuitarist}</div>
-                      )}
-                      {!reg.bestKeyboardist && !reg.bestRhythmist && !reg.bestGuitarist && (
-                        <span className="text-slate-600 text-[11px]">—</span>
-                      )}
+                    <td className="py-3 px-4 space-y-0.5 text-[11px]">
+                      {reg.keyboardist && <div className="text-amber-300">🎹 Keys: {reg.keyboardist}</div>}
+                      {reg.harmonium && <div className="text-amber-300">🪗 Harm: {reg.harmonium}</div>}
+                      {!reg.keyboardist && !reg.harmonium && <span className="text-slate-600">—</span>}
+                    </td>
+                    <td className="py-3 px-4 space-y-0.5 text-[11px]">
+                      {reg.octopadDrums && <div className="text-rose-300">🥁 Octopad/Drums: {reg.octopadDrums}</div>}
+                      {reg.dholak && <div className="text-rose-300">🪘 Dholak: {reg.dholak}</div>}
+                      {reg.tablaNaal && <div className="text-rose-300">🪘 Tabla: {reg.tablaNaal}</div>}
+                      {reg.clapBox && <div className="text-rose-300">📦 Cajon: {reg.clapBox}</div>}
+                      {!reg.octopadDrums && !reg.dholak && !reg.tablaNaal && !reg.clapBox && <span className="text-slate-600">—</span>}
+                    </td>
+                    <td className="py-3 px-4 space-y-0.5 text-[11px]">
+                      {reg.saxophone && <div className="text-cyan-300">🎷 Sax: {reg.saxophone}</div>}
+                      {reg.basuri && <div className="text-cyan-300">🪈 Basuri: {reg.basuri}</div>}
+                      {!reg.saxophone && !reg.basuri && <span className="text-slate-600">—</span>}
                     </td>
                   </tr>
                 ))}
@@ -357,6 +356,19 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
           </div>
         </div>
       )}
+
+      {/* Confirmation Dialog */}
+      <ConfirmationDialog
+        isOpen={showConfirmModal}
+        title="Confirm Participant Import"
+        message={`Are you sure you want to import ${generatedActs.length} competition acts for ${rawRegistrations.length} churches into this event? This will generate performance slots and populate the stage queue.`}
+        confirmLabel="Yes, Import Acts"
+        cancelLabel="No, Review Again"
+        variant="primary"
+        isLoading={importing}
+        onConfirm={handleCommitImport}
+        onCancel={() => setShowConfirmModal(false)}
+      />
     </div>
   );
 }

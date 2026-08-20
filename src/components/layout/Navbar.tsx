@@ -86,6 +86,16 @@ export function Navbar({ environment = 'live' }: { environment?: 'live' | 'pract
 
           {(user?.role === 'admin' || user?.role === 'super_admin') && (
             <Link
+              href="/admin/users"
+              className="px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-900 transition-colors flex items-center gap-1.5"
+            >
+              <Shield className="w-4 h-4 text-purple-400" />
+              <span>User Roles</span>
+            </Link>
+          )}
+
+          {(user?.role === 'admin' || user?.role === 'super_admin') && (
+            <Link
               href="/admin/dashboard"
               className="px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-900 transition-colors flex items-center gap-1.5"
             >

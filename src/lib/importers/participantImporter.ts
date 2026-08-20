@@ -31,6 +31,7 @@ export interface ParsedParticipantRow {
 
 export interface GoogleFormChurchRegistration {
   rowNumber: number;
+  performanceOrder?: number;
   timestamp?: string;
   email?: string;
   churchName: string;
@@ -40,6 +41,19 @@ export interface GoogleFormChurchRegistration {
   duetParticipant1?: string;
   duetParticipant2?: string;
   instrumentPlayersText?: string;
+  // Specific Instruments
+  keyboardist?: string | null;
+  harmonium?: string | null;
+  guitarist?: string | null;
+  electricGuitarist?: string | null;
+  bassGuitarist?: string | null;
+  octopadDrums?: string | null;
+  dholak?: string | null;
+  tablaNaal?: string | null;
+  clapBox?: string | null;
+  saxophone?: string | null;
+  basuri?: string | null;
+  // Award Nominees
   bestKeyboardist?: string | null;
   bestRhythmist?: string | null;
   bestGuitarist?: string | null;
@@ -59,10 +73,6 @@ export interface ParsedTeamRow {
 
 /**
  * Parses raw text containing instrument names and performer names.
- * Examples handled:
- * - "Keyboard: Mark, Drums: Luke, Guitar: Paul"
- * - "Mark (Keys), Luke (Drums), Paul (Guitar)"
- * - "Keyboardist - Mark, Drummer - Luke, Bass - Paul"
  */
 export function extractInstrumentalists(rawText?: string | null): {
   keyboardist: string | null;
@@ -78,25 +88,24 @@ export function extractInstrumentalists(rawText?: string | null): {
   let rhythmist: string | null = null;
   let guitarist: string | null = null;
 
-  // Split by common delimiters (commas, semicolons, slashes, newlines)
   const segments = text.split(/[,;\n/]+/).map((s) => s.trim()).filter(Boolean);
 
   for (const seg of segments) {
     const lower = seg.toLowerCase();
 
     // 1. Keyboardist Detection
-    if (lower.includes('key') || lower.includes('pian') || lower.includes('organ') || lower.includes('synth')) {
-      const cleaned = seg.replace(/(best\s*)?(keyboardist|keyboard|keys|pianist|piano|organ|synth)(\s*[:\-=])?/gi, '').replace(/[()]/g, '').trim();
+    if (lower.includes('key') || lower.includes('pian') || lower.includes('organ') || lower.includes('synth') || lower.includes('harmon')) {
+      const cleaned = seg.replace(/(best\s*)?(keyboardist|keyboard|keys|pianist|piano|organ|synth|harmonium)(\s*[:\-=])?/gi, '').replace(/[()]/g, '').trim();
       if (cleaned) keyboardist = cleaned;
     }
     // 2. Rhythmist / Drummer Detection
-    else if (lower.includes('drum') || lower.includes('rhythm') || lower.includes('cajon') || lower.includes('octapad') || lower.includes('pad') || lower.includes('perc')) {
-      const cleaned = seg.replace(/(best\s*)?(rhythmist|drummer|drums|cajon|octapad|percussion|pad)(\s*[:\-=])?/gi, '').replace(/[()]/g, '').trim();
+    else if (lower.includes('drum') || lower.includes('rhythm') || lower.includes('cajon') || lower.includes('octapad') || lower.includes('octopad') || lower.includes('pad') || lower.includes('perc') || lower.includes('dhol') || lower.includes('tabla') || lower.includes('naal') || lower.includes('clap')) {
+      const cleaned = seg.replace(/(best\s*)?(rhythmist|drummer|drums|cajon|octapad|octopad|percussion|pad|dholak|dhol|tabla|naal|clap\s*box)(\s*[:\-=])?/gi, '').replace(/[()]/g, '').trim();
       if (cleaned) rhythmist = cleaned;
     }
     // 3. Guitarist Detection
-    else if (lower.includes('guitar') || lower.includes('lead') || lower.includes('bass') || lower.includes('acoustic')) {
-      const cleaned = seg.replace(/(best\s*)?(guitarist|guitar|lead\s*guitar|bass\s*guitar|acoustic)(\s*[:\-=])?/gi, '').replace(/[()]/g, '').trim();
+    else if (lower.includes('guitar') || lower.includes('lead') || lower.includes('bass') || lower.includes('acoustic') || lower.includes('electric')) {
+      const cleaned = seg.replace(/(best\s*)?(guitarist|guitar|lead\s*guitar|electric\s*guitar|bass\s*guitar|acoustic)(\s*[:\-=])?/gi, '').replace(/[()]/g, '').trim();
       if (cleaned) guitarist = cleaned;
     }
   }
@@ -121,36 +130,94 @@ function normalizeRowKeys(row: Record<string, unknown>, index = 0): Record<strin
     const lowerKey = key.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const strVal = String(value ?? '').trim();
     
-    // Map Google Form exact & fuzzy headers
-    if (['churchname', 'church', 'parish', 'congregation'].includes(lowerKey)) {
+    // 1. Serial / Order
+    if (['sno', 'slno', 'sno.', 'serialno', 'order', 'performanceorder', 'seq', 'slot'].includes(lowerKey)) {
+      normalized['performanceOrder'] = Number(strVal) || index + 1;
+    }
+    // 2. Church / Team Name
+    else if (['churchname', 'church', 'parish', 'congregation'].includes(lowerKey)) {
       normalized['churchName'] = strVal;
       if (!normalized['institution']) normalized['institution'] = strVal;
+      if (!normalized['teamName']) normalized['teamName'] = strVal;
+    } else if (['teamname', 'team', 'groupname', 'bandname'].includes(lowerKey)) {
+      normalized['teamName'] = strVal;
+      if (!normalized['churchName']) normalized['churchName'] = strVal;
     } else if (['institution', 'school', 'college', 'academy', 'org'].includes(lowerKey)) {
       normalized['institution'] = strVal;
       if (!normalized['churchName']) normalized['churchName'] = strVal;
-    } else if (['teamname', 'team', 'groupname', 'bandname'].includes(lowerKey)) {
-      normalized['teamName'] = strVal;
-    } else if (['soloparticipantname', 'soloparticpantname', 'soloperformer', 'soloname', 'solo'].includes(lowerKey)) {
+    }
+    // 3. Solo Participant
+    else if (['soloname', 'soloparticipantname', 'soloparticpantname', 'soloperformer', 'solo'].includes(lowerKey)) {
       normalized['soloParticipantName'] = strVal;
       normalized['participantName'] = strVal;
       const parts = strVal.split(' ');
       normalized['firstName'] = parts[0] || '';
       normalized['lastName'] = parts.slice(1).join(' ') || '';
-    } else if (['duetparticipantname1', 'duetparticpantname1', 'duetperformer1', 'duet1'].includes(lowerKey)) {
+    }
+    // 4. Duet Participant
+    else if (['duetname', 'duetparticipantname', 'duetparticipantname1', 'duetparticpantname1', 'duetperformer1', 'duet1', 'duet'].includes(lowerKey)) {
       normalized['duetParticipant1'] = strVal;
     } else if (['duetparticipantname2', 'duetparticpantname2', 'duetperformer2', 'duet2'].includes(lowerKey)) {
       normalized['duetParticipant2'] = strVal;
-    } else if (['choirleadername', 'choirleader', 'leadername', 'leader'].includes(lowerKey)) {
+    }
+    // 5. Leader / Pastor
+    else if (['choirleadername', 'choirleader', 'leadername', 'leader'].includes(lowerKey)) {
       normalized['choirLeaderName'] = strVal;
     } else if (['pastorfathername', 'pastorname', 'fathername', 'pastor', 'father'].includes(lowerKey)) {
       normalized['pastorName'] = strVal;
-    } else if (['totalinstrumentplayerwithinstrumentname', 'instrumentplayers', 'instruments', 'instrumentalist'].includes(lowerKey)) {
+    }
+    // 6. Specific Instrument Columns & Awards
+    else if (['bestkeyboardist', 'keyboard', 'keys', 'pianist', 'piano'].includes(lowerKey)) {
+      normalized['keyboardist'] = strVal || null;
+      normalized['bestKeyboardist'] = strVal || null;
+    } else if (['bestrhythmist', 'rhythmist', 'drums', 'drummer', 'percussion', 'octopaddrums', 'octopad', 'octapad', 'octapaddrums'].includes(lowerKey)) {
+      normalized['octopadDrums'] = strVal || null;
+      normalized['bestRhythmist'] = strVal || null;
+    } else if (['bestguitarist', 'guitar', 'guitarist', 'acousticguitar', 'leadguitar'].includes(lowerKey)) {
+      normalized['guitarist'] = strVal || null;
+      normalized['bestGuitarist'] = strVal || null;
+    } else if (['electricguitar'].includes(lowerKey)) {
+      normalized['electricGuitarist'] = strVal || null;
+      if (!normalized['bestGuitarist']) normalized['bestGuitarist'] = strVal || null;
+    } else if (['bassguitar', 'bass'].includes(lowerKey)) {
+      normalized['bassGuitarist'] = strVal || null;
+      if (!normalized['bestGuitarist']) normalized['bestGuitarist'] = strVal || null;
+    } else if (['dholak', 'dhol'].includes(lowerKey)) {
+      normalized['dholak'] = strVal || null;
+      if (!normalized['bestRhythmist']) normalized['bestRhythmist'] = strVal || null;
+    } else if (['harmonium'].includes(lowerKey)) {
+      normalized['harmonium'] = strVal || null;
+      if (!normalized['bestKeyboardist']) normalized['bestKeyboardist'] = strVal || null;
+    } else if (['tablanaal', 'tabla', 'naal'].includes(lowerKey)) {
+      normalized['tablaNaal'] = strVal || null;
+      if (!normalized['bestRhythmist']) normalized['bestRhythmist'] = strVal || null;
+    } else if (['clapbox', 'cajon'].includes(lowerKey)) {
+      normalized['clapBox'] = strVal || null;
+      if (!normalized['bestRhythmist']) normalized['bestRhythmist'] = strVal || null;
+    } else if (['saxophone', 'sax'].includes(lowerKey)) {
+      normalized['saxophone'] = strVal || null;
+    } else if (['basuri', 'flute', 'bansuri'].includes(lowerKey)) {
+      normalized['basuri'] = strVal || null;
+    }
+    // 7. General Instruments Text
+    else if (['totalinstrumentplayerwithinstrumentname', 'instrumentplayers', 'instruments', 'instrumentalist'].includes(lowerKey)) {
       normalized['instrumentPlayersText'] = strVal;
       const instruments = extractInstrumentalists(strVal);
-      if (instruments.keyboardist) normalized['bestKeyboardist'] = instruments.keyboardist;
-      if (instruments.rhythmist) normalized['bestRhythmist'] = instruments.rhythmist;
-      if (instruments.guitarist) normalized['bestGuitarist'] = instruments.guitarist;
-    } else if (['name', 'fullname', 'performername', 'performer', 'participant', 'participantname'].includes(lowerKey)) {
+      if (instruments.keyboardist) {
+        normalized['keyboardist'] = instruments.keyboardist;
+        normalized['bestKeyboardist'] = instruments.keyboardist;
+      }
+      if (instruments.rhythmist) {
+        normalized['octopadDrums'] = instruments.rhythmist;
+        normalized['bestRhythmist'] = instruments.rhythmist;
+      }
+      if (instruments.guitarist) {
+        normalized['guitarist'] = instruments.guitarist;
+        normalized['bestGuitarist'] = instruments.guitarist;
+      }
+    }
+    // 8. General Participant Fields
+    else if (['name', 'fullname', 'performername', 'performer', 'participant', 'participantname'].includes(lowerKey)) {
       normalized['participantName'] = strVal;
       const parts = strVal.split(' ');
       normalized['firstName'] = parts[0] || '';
@@ -167,12 +234,6 @@ function normalizeRowKeys(row: Record<string, unknown>, index = 0): Record<strin
       if (typeVal.includes('duet')) normalized['performanceType'] = 'duet';
       else if (typeVal.includes('group') || typeVal.includes('choir') || typeVal.includes('band')) normalized['performanceType'] = 'group';
       else normalized['performanceType'] = 'solo';
-    } else if (['bestkeyboardist', 'keyboardist', 'keyboard', 'keys', 'pianist'].includes(lowerKey)) {
-      normalized['bestKeyboardist'] = strVal || null;
-    } else if (['bestrhythmist', 'rhythmist', 'drums', 'drummer', 'percussion', 'cajon'].includes(lowerKey)) {
-      normalized['bestRhythmist'] = strVal || null;
-    } else if (['bestguitarist', 'guitarist', 'guitar', 'leadguitar', 'bassguitar', 'acoustic'].includes(lowerKey)) {
-      normalized['bestGuitarist'] = strVal || null;
     } else if (['noofparticipants', 'noofparticpants', 'participantscount', 'count'].includes(lowerKey)) {
       normalized['numberOfParticipants'] = Number(strVal) || undefined;
     } else if (['noofextraperson', 'extrapersons', 'extra'].includes(lowerKey)) {
@@ -186,14 +247,17 @@ function normalizeRowKeys(row: Record<string, unknown>, index = 0): Record<strin
       normalized['contactPhone'] = strVal;
     } else if (['category', 'categoryname', 'event'].includes(lowerKey)) {
       normalized['categoryName'] = strVal;
-    } else if (['order', 'performanceorder', 'seq', 'slot', 'slno'].includes(lowerKey)) {
-      normalized['performanceOrder'] = Number(value) || undefined;
     } else {
       normalized[cleanKey] = value;
     }
   }
 
-  // Ensure default codes and fallbacks
+  // Determine Primary Instrument Award Nominees
+  normalized['bestKeyboardist'] = (normalized['keyboardist'] || normalized['harmonium'] || null) as string | null;
+  normalized['bestRhythmist'] = (normalized['octopadDrums'] || normalized['dholak'] || normalized['tablaNaal'] || normalized['clapBox'] || null) as string | null;
+  normalized['bestGuitarist'] = (normalized['guitarist'] || normalized['electricGuitarist'] || normalized['bassGuitarist'] || null) as string | null;
+
+  // Fallbacks
   if (!normalized['teamName'] && normalized['churchName']) {
     normalized['teamName'] = normalized['churchName'];
   }
@@ -204,10 +268,12 @@ function normalizeRowKeys(row: Record<string, unknown>, index = 0): Record<strin
     normalized['institution'] = (normalized['churchName'] || normalized['teamName']) as string | undefined;
   }
   if (!normalized['participantCode']) {
-    normalized['participantCode'] = `P-${(index + 1).toString().padStart(3, '0')}`;
+    const orderNum = normalized['performanceOrder'] || index + 1;
+    normalized['participantCode'] = `P-${orderNum.toString().padStart(3, '0')}`;
   }
   if (!normalized['teamCode']) {
-    normalized['teamCode'] = `T-${(index + 1).toString().padStart(3, '0')}`;
+    const orderNum = normalized['performanceOrder'] || index + 1;
+    normalized['teamCode'] = `T-${orderNum.toString().padStart(3, '0')}`;
   }
   if (!normalized['performanceType']) {
     normalized['performanceType'] = 'solo';
@@ -225,7 +291,7 @@ function normalizeRowKeys(row: Record<string, unknown>, index = 0): Record<strin
 }
 
 /**
- * Parses Google Form Responses sheet / CSV into structured church registrations
+ * Parses Google Form / Custom Sheet Responses into structured church registrations
  */
 export function parseGoogleFormRegistrations(
   content: string | ArrayBuffer,
@@ -252,13 +318,12 @@ export function parseGoogleFormRegistrations(
 
   rawRows.forEach((row, idx) => {
     const normalized = normalizeRowKeys(row, idx);
-    const instruments = extractInstrumentalists(normalized['instrumentPlayersText'] as string);
-
     const churchName = String(normalized['churchName'] || normalized['teamName'] || `Church ${idx + 1}`).trim();
     if (!churchName) return;
 
     results.push({
       rowNumber: idx + 2,
+      performanceOrder: Number(normalized['performanceOrder']) || idx + 1,
       timestamp: normalized['timestamp'] ? String(normalized['timestamp']) : undefined,
       email: normalized['email'] || normalized['contactEmail'] ? String(normalized['email'] || normalized['contactEmail']) : undefined,
       churchName,
@@ -267,10 +332,22 @@ export function parseGoogleFormRegistrations(
       soloParticipantName: normalized['soloParticipantName'] ? String(normalized['soloParticipantName']) : undefined,
       duetParticipant1: normalized['duetParticipant1'] ? String(normalized['duetParticipant1']) : undefined,
       duetParticipant2: normalized['duetParticipant2'] ? String(normalized['duetParticipant2']) : undefined,
-      instrumentPlayersText: normalized['instrumentPlayersText'] ? String(normalized['instrumentPlayersText']) : undefined,
-      bestKeyboardist: normalized['bestKeyboardist'] as string || instruments.keyboardist,
-      bestRhythmist: normalized['bestRhythmist'] as string || instruments.rhythmist,
-      bestGuitarist: normalized['bestGuitarist'] as string || instruments.guitarist,
+      // Specific Instruments
+      keyboardist: normalized['keyboardist'] as string || null,
+      harmonium: normalized['harmonium'] as string || null,
+      guitarist: normalized['guitarist'] as string || null,
+      electricGuitarist: normalized['electricGuitarist'] as string || null,
+      bassGuitarist: normalized['bassGuitarist'] as string || null,
+      octopadDrums: normalized['octopadDrums'] as string || null,
+      dholak: normalized['dholak'] as string || null,
+      tablaNaal: normalized['tablaNaal'] as string || null,
+      clapBox: normalized['clapBox'] as string || null,
+      saxophone: normalized['saxophone'] as string || null,
+      basuri: normalized['basuri'] as string || null,
+      // Award Nominees
+      bestKeyboardist: normalized['bestKeyboardist'] as string || null,
+      bestRhythmist: normalized['bestRhythmist'] as string || null,
+      bestGuitarist: normalized['bestGuitarist'] as string || null,
       numberOfParticipants: Number(normalized['numberOfParticipants']) || undefined,
       numberOfExtraPersons: Number(normalized['numberOfExtraPersons']) || undefined,
     });
@@ -280,7 +357,7 @@ export function parseGoogleFormRegistrations(
 }
 
 /**
- * Converts Google Form Church Registrations into individual Solo, Duet, and Group Competition Acts
+ * Converts Google Form / Custom Sheet Registrations into individual Solo, Duet, and Group Competition Acts
  */
 export function convertGoogleFormsToCompetitionActs(
   registrations: GoogleFormChurchRegistration[]
@@ -290,6 +367,7 @@ export function convertGoogleFormsToCompetitionActs(
 
   registrations.forEach((reg, churchIdx) => {
     const churchCode = `C${(churchIdx + 1).toString().padStart(2, '0')}`;
+    const baseOrder = reg.performanceOrder || orderCounter++;
 
     // 1. Solo Act (if solo performer provided)
     if (reg.soloParticipantName) {
@@ -306,7 +384,7 @@ export function convertGoogleFormsToCompetitionActs(
         bestGuitarist: reg.bestGuitarist,
         institution: reg.churchName,
         contactEmail: reg.email,
-        performanceOrder: orderCounter++,
+        performanceOrder: baseOrder,
       });
     }
 
@@ -326,7 +404,7 @@ export function convertGoogleFormsToCompetitionActs(
         bestGuitarist: reg.bestGuitarist,
         institution: reg.churchName,
         contactEmail: reg.email,
-        performanceOrder: orderCounter++,
+        performanceOrder: baseOrder,
       });
     }
 
@@ -348,7 +426,7 @@ export function convertGoogleFormsToCompetitionActs(
       bestGuitarist: reg.bestGuitarist,
       institution: reg.churchName,
       contactEmail: reg.email,
-      performanceOrder: orderCounter++,
+      performanceOrder: baseOrder,
     });
   });
 
@@ -385,7 +463,7 @@ export function parseAndValidateParticipants(
   const seenCodes = new Set<string>();
 
   rawRows.forEach((rawRow, index) => {
-    const rowNumber = index + 2; // Accounting for 1-based index and header row
+    const rowNumber = index + 2;
     const normalized = normalizeRowKeys(rawRow, index);
 
     const validation = ParticipantImportRowSchema.safeParse(normalized);

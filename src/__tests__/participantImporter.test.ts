@@ -1,7 +1,9 @@
-// src/__tests__/participantImporter.test.ts - Unit Tests for CSV/Excel Importer
-
 import { describe, it, expect } from 'vitest';
-import { parseAndValidateParticipants } from '../lib/importers/participantImporter';
+import { 
+  parseAndValidateParticipants,
+  parseGoogleFormRegistrations,
+  convertGoogleFormsToCompetitionActs
+} from '../lib/importers/participantImporter';
 
 describe('Participant CSV/Excel Importer & Validator', () => {
   it('parses valid CSV with standard columns', () => {
@@ -39,5 +41,30 @@ P-301,Charlie,Brown,valid@example.com`;
     // Row 1 has invalid email
     expect(result.invalidRows.length).toBe(1);
     expect(result.invalidRows[0].rowNumber).toBe(2);
+  });
+
+  it('parses exact custom church sheet with multi-instrument columns', () => {
+    const customCsv = `Sno.,Church Name,Solo Name,Duet Name,Guitar,Electric Guitar,Bass Guitar,Octopad/Drums,Keyboard,Dholak,Harmonium,Tabla / Naal,Clap Box,Saxophone,Basuri
+1,St. Thomas Cathedral,Mark Paul,Luke & John,Acoustic Guy,Elec Steve,Bass Kevin,Drummer Dan,Keys Keith,Dholak Dave,Harmonium Harry,Tabla Tom,Cajon Carl,Sax Sam,Flute Felix`;
+
+    const regs = parseGoogleFormRegistrations(customCsv, 'csv');
+    expect(regs.length).toBe(1);
+    expect(regs[0].churchName).toBe('St. Thomas Cathedral');
+    expect(regs[0].soloParticipantName).toBe('Mark Paul');
+    expect(regs[0].duetParticipant1).toBe('Luke & John');
+    expect(regs[0].guitarist).toBe('Acoustic Guy');
+    expect(regs[0].octopadDrums).toBe('Drummer Dan');
+    expect(regs[0].keyboardist).toBe('Keys Keith');
+    expect(regs[0].bestKeyboardist).toBe('Keys Keith');
+    expect(regs[0].bestRhythmist).toBe('Drummer Dan');
+    expect(regs[0].bestGuitarist).toBe('Acoustic Guy');
+
+    const acts = convertGoogleFormsToCompetitionActs(regs);
+    expect(acts.length).toBe(3); // Solo, Duet, Group
+    expect(acts[0].performanceType).toBe('solo');
+    expect(acts[0].participantName).toBe('Mark Paul');
+    expect(acts[1].performanceType).toBe('duet');
+    expect(acts[1].participantName).toBe('Luke & John');
+    expect(acts[2].performanceType).toBe('group');
   });
 });
