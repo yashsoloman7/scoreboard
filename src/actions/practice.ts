@@ -15,57 +15,103 @@ export async function initializePracticeSandbox(competitionId: string) {
   );
   const supabase = await createServerSupabaseClient();
 
-  // 1. Create Demo Category
-  const { data: cat } = await supabase
+  // 1. Check or Create Demo Category
+  let { data: cat } = await supabase
     .from('categories')
-    .insert({
-      competition_id: competitionId,
-      name: 'Practice Sandbox (Demo)',
-      performer_type: 'solo',
-      display_order: 999,
-      scoring_formula: 'weighted_sum',
-    })
-    .select()
-    .single();
+    .select('id')
+    .eq('competition_id', competitionId)
+    .eq('name', 'Practice Sandbox (Demo)')
+    .maybeSingle();
 
-  // 2. Create Round
-  const { data: round } = await supabase
+  if (!cat) {
+    const { data: newCat, error: catError } = await supabase
+      .from('categories')
+      .insert({
+        competition_id: competitionId,
+        name: 'Practice Sandbox (Demo)',
+        performer_type: 'solo',
+        display_order: 999,
+        scoring_formula: 'weighted_sum',
+      })
+      .select()
+      .single();
+
+    if (catError || !newCat) {
+      throw new Error(`Failed to create practice category: ${catError?.message || 'Unknown error'}`);
+    }
+    cat = newCat;
+  }
+
+  const categoryId = cat!.id;
+
+  // 2. Check or Create Round
+  let { data: round } = await supabase
     .from('rounds')
-    .insert({
-      category_id: cat.id,
-      round_number: 1,
-      name: 'Practice Session',
-      is_final: true,
-    })
-    .select()
-    .single();
+    .select('id')
+    .eq('category_id', categoryId)
+    .eq('round_number', 1)
+    .maybeSingle();
 
-  // 3. Create Criteria Version & Criteria
-  const { data: version } = await supabase
+  if (!round) {
+    const { data: newRound, error: roundError } = await supabase
+      .from('rounds')
+      .insert({
+        category_id: categoryId,
+        round_number: 1,
+        name: 'Practice Session',
+        is_final: true,
+      })
+      .select()
+      .single();
+
+    if (roundError || !newRound) {
+      throw new Error(`Failed to create practice round: ${roundError?.message || 'Unknown error'}`);
+    }
+    round = newRound;
+  }
+
+  const roundId = round!.id;
+
+  // 3. Check or Create Criteria Version & Criteria
+  let { data: version } = await supabase
     .from('criteria_versions')
-    .insert({
-      category_id: cat.id,
-      version_number: 1,
-      is_locked: false,
-      created_by: user.id,
-    })
-    .select()
-    .single();
+    .select('id')
+    .eq('category_id', categoryId)
+    .eq('version_number', 1)
+    .maybeSingle();
 
-  const criteriaRows = PRACTICE_DEMO_CRITERIA.map((c) => ({
-    criteria_version_id: version.id,
-    name: c.name,
-    max_marks: c.maxMarks,
-    weight: c.weight,
-    display_order: c.displayOrder,
-  }));
+  if (!version) {
+    const { data: newVersion, error: versionError } = await supabase
+      .from('criteria_versions')
+      .insert({
+        category_id: categoryId,
+        version_number: 1,
+        is_locked: false,
+        created_by: user.id,
+      })
+      .select()
+      .single();
 
-  await supabase.from('category_criteria').insert(criteriaRows);
+    if (versionError || !newVersion) {
+      throw new Error(`Failed to create criteria version: ${versionError?.message || 'Unknown error'}`);
+    }
+    version = newVersion;
+
+    const criteriaRows = PRACTICE_DEMO_CRITERIA.map((c) => ({
+      criteria_version_id: version!.id,
+      name: c.name,
+      max_marks: c.maxMarks,
+      weight: c.weight,
+      display_order: c.displayOrder,
+    }));
+
+    await supabase.from('category_criteria').insert(criteriaRows);
+  }
 
   // 4. Insert Demo Participants and Performances
   for (let i = 0; i < PRACTICE_DEMO_PARTICIPANTS.length; i++) {
     const demo = PRACTICE_DEMO_PARTICIPANTS[i];
-    const { data: p } = await supabase
+    const { data: p, error: pError } = await supabase
       .from('participants')
       .upsert({
         competition_id: competitionId,
@@ -74,39 +120,72 @@ export async function initializePracticeSandbox(competitionId: string) {
         last_name: demo.lastName,
         institution: demo.institution,
         environment: 'practice',
-      }, { onConflict: 'competition_id, participant_code, environment' })
+      }, { onConflict: 'competition_id,participant_code,environment' })
       .select()
       .single();
 
-    const { data: perf } = await supabase
+    if (pError || !p) {
+      console.error('Participant upsert error:', pError);
+      continue;
+    }
+
+    const { data: existingPerf } = await supabase
       .from('performances')
-      .insert({
-        round_id: round.id,
-        participant_id: p.id,
-        performance_order: i + 1,
-        performance_code: `${demo.participantCode}-R1`,
-        status: i === 0 ? 'performing' : 'scheduled',
-      })
-      .select()
-      .single();
+      .select('id')
+      .eq('round_id', roundId)
+      .eq('performance_order', i + 1)
+      .maybeSingle();
 
-    await supabase.from('timers').insert({
-      performance_id: perf.id,
-      status: 'idle',
-    });
+    let perfId = existingPerf?.id;
+
+    if (!existingPerf) {
+      const { data: newPerf, error: perfError } = await supabase
+        .from('performances')
+        .insert({
+          round_id: roundId,
+          participant_id: p.id,
+          performance_order: i + 1,
+          performance_code: `${demo.participantCode}-R1`,
+          status: i === 0 ? 'performing' : 'scheduled',
+        })
+        .select()
+        .single();
+
+      if (perfError) {
+        console.error('Performance insert error:', perfError);
+      } else if (newPerf) {
+        perfId = newPerf.id;
+      }
+    }
+
+    if (perfId) {
+      const { data: existingTimer } = await supabase
+        .from('timers')
+        .select('id')
+        .eq('performance_id', perfId)
+        .maybeSingle();
+
+      if (!existingTimer) {
+        await supabase.from('timers').insert({
+          performance_id: perfId,
+          status: 'idle',
+        });
+      }
+    }
   }
 
   // 5. Assign current user as judge to the practice category
   await supabase.from('judge_assignments').upsert({
     competition_id: competitionId,
-    category_id: cat.id,
+    category_id: categoryId,
     judge_id: user.id,
     judge_seat_number: 1,
     is_active: true,
-  }, { onConflict: 'category_id, judge_id' });
+  }, { onConflict: 'category_id,judge_id' });
 
-  revalidatePath('/practice');
-  return { success: true, categoryId: cat.id, roundId: round.id };
+  revalidatePath('/admin/control-room');
+  revalidatePath('/judge');
+  return { success: true, categoryId, roundId };
 }
 
 export async function resetPracticeSandbox(competitionId: string) {
