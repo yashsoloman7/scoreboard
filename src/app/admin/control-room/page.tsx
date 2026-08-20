@@ -69,9 +69,8 @@ export default function ControlRoomPage() {
 
   const [timeLeft, setTimeLeft] = useState(300);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  // 1. Load Real Live Competitions (Excludes any demo or practice mock data)
+  // 1. Load Real Live Competitions
   useEffect(() => {
     async function loadComps() {
       const { data } = await supabase
@@ -118,7 +117,6 @@ export default function ControlRoomPage() {
 
     if (st) {
       setEventState(st);
-      setTimeLeft(st.timer_duration_seconds - Math.floor(st.timer_elapsed_seconds || 0));
     }
 
     if (scList) setScores(scList);
@@ -149,16 +147,30 @@ export default function ControlRoomPage() {
     };
   }, [selectedCompId, loadEventData]);
 
-  // 4. Timer Countdown Ticker
+  // 4. Tab-Change Resilient Authoritative Wall-Clock Timer
   useEffect(() => {
-    if (eventState?.stage_mode !== 'live' || eventState?.timer_status !== 'running') return;
+    if (eventState?.stage_mode !== 'live' || eventState?.timer_status !== 'running') {
+      if (eventState?.timer_duration_seconds) {
+        setTimeLeft(eventState.timer_duration_seconds - Math.floor(eventState.timer_elapsed_seconds || 0));
+      }
+      return;
+    }
 
+    const calcRemaining = () => {
+      if (!eventState?.timer_started_at) return eventState?.timer_duration_seconds || 300;
+      const startedMs = new Date(eventState.timer_started_at).getTime();
+      const elapsedSecs = Math.floor((Date.now() - startedMs) / 1000);
+      const totalDur = eventState.timer_duration_seconds || 300;
+      return Math.max(0, totalDur - elapsedSecs);
+    };
+
+    setTimeLeft(calcRemaining());
     const interval = setInterval(() => {
-      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
+      setTimeLeft(calcRemaining());
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [eventState?.stage_mode, eventState?.timer_status]);
+  }, [eventState?.stage_mode, eventState?.timer_status, eventState?.timer_started_at, eventState?.timer_duration_seconds]);
 
   const currentAct = acts[currentActIndex] || null;
   const isLive = eventState?.stage_mode === 'live';
@@ -192,6 +204,7 @@ export default function ControlRoomPage() {
       is_judge_input_unlocked: false,
       timer_status: 'idle',
       timer_elapsed_seconds: 0,
+      timer_started_at: null,
       current_category: target.performance_type,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'event_id' });
@@ -231,7 +244,7 @@ export default function ControlRoomPage() {
             <span className="text-xs font-bold text-slate-400">Active Event:</span>
             {competitions.length === 0 ? (
               <Link
-                href="/admin/create"
+                href="/admin/dashboard"
                 className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow"
               >
                 <PlusCircle className="w-3.5 h-3.5" /> Create Event
@@ -353,7 +366,7 @@ export default function ControlRoomPage() {
                 <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 text-center space-y-4">
                   <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 flex items-center justify-center gap-2">
                     <Clock className="w-4 h-4 text-cyan-400" />
-                    <span>Authoritative Stage Countdown Clock</span>
+                    <span>Authoritative Wall-Clock Stage Countdown</span>
                   </div>
 
                   <div className={`font-mono text-5xl sm:text-6xl font-black tracking-tight ${
@@ -407,7 +420,7 @@ export default function ControlRoomPage() {
                 </div>
 
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  During live performance, judges evaluate Criteria parameters (Technicality, Presentation, Rhythm, Impact) and submit SHA-256 cryptographically locked scores.
+                  Judges evaluate Creator-Configured Criteria with direct numeric input and submit SHA-256 signed scores.
                 </p>
 
                 <div className="space-y-2 pt-2">
@@ -428,12 +441,18 @@ export default function ControlRoomPage() {
                   )}
                 </div>
 
-                <div className="pt-4 border-t border-slate-800">
+                <div className="pt-4 border-t border-slate-800 space-y-2">
                   <Link
                     href="/live"
                     className="w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-950 transition-all"
                   >
                     <Trophy className="w-4 h-4" /> View Live Scoreboard
+                  </Link>
+                  <Link
+                    href="/admin/dashboard"
+                    className="w-full py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 transition-all"
+                  >
+                    <Award className="w-4 h-4 text-purple-400" /> Review Category Prizes & Standings
                   </Link>
                 </div>
               </div>

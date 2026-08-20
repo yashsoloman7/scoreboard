@@ -1,6 +1,6 @@
 'use client';
 
-// src/components/judge/JudgePanel.tsx - Creator-Configured Dynamic Criteria Scoring Portal
+// src/components/judge/JudgePanel.tsx - Criteria Scoring Portal with Direct Manual Marks Input & Wall-Clock Timer
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { submitJudgeScore } from '@/actions/scoring';
@@ -16,7 +16,8 @@ import {
   Sliders,
   ListOrdered,
   Music,
-  Award
+  Award,
+  Edit3
 } from 'lucide-react';
 
 interface JudgePanelProps {
@@ -65,7 +66,6 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
 
       if (!targetId) return;
 
-      // Fetch dynamic criteria configured by creator
       try {
         const config = await getEventCriteria(targetId);
         if (config?.criteria) {
@@ -88,7 +88,6 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
 
       if (st) {
         setEventState(st);
-        setTimeLeft(st.timer_duration_seconds || 300);
         if (st.active_participant_id && pList) {
           const current = pList.find((p) => p.id === st.active_participant_id) || null;
           setActivePerformer(current);
@@ -123,7 +122,6 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
           .order('performance_order', { ascending: true });
 
         if (updated.active_participant_id !== activePerformer?.id) {
-          // Reset score fields for next performer
           setHashReceipt(null);
           setCriteriaScores((prev) => {
             const reset: Record<string, number> = {};
@@ -170,16 +168,30 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
     };
   }, [activeEventId, activePerformer?.id]);
 
-  // 3. Live Countdown Timer Ticker
+  // 3. Tab-Change Resilient Authoritative Wall-Clock Timer
   useEffect(() => {
-    if (eventState?.stage_mode !== 'live' || eventState?.timer_status !== 'running') return;
+    if (eventState?.stage_mode !== 'live' || eventState?.timer_status !== 'running') {
+      if (eventState?.timer_duration_seconds) {
+        setTimeLeft(eventState.timer_duration_seconds - Math.floor(eventState.timer_elapsed_seconds || 0));
+      }
+      return;
+    }
 
+    const calcRemaining = () => {
+      if (!eventState?.timer_started_at) return eventState?.timer_duration_seconds || 300;
+      const startedMs = new Date(eventState.timer_started_at).getTime();
+      const elapsedSecs = Math.floor((Date.now() - startedMs) / 1000);
+      const totalDur = eventState.timer_duration_seconds || 300;
+      return Math.max(0, totalDur - elapsedSecs);
+    };
+
+    setTimeLeft(calcRemaining());
     const interval = setInterval(() => {
-      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
+      setTimeLeft(calcRemaining());
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [eventState?.stage_mode, eventState?.timer_status]);
+  }, [eventState?.stage_mode, eventState?.timer_status, eventState?.timer_started_at, eventState?.timer_duration_seconds]);
 
   const isGroupAct = activePerformer?.performance_type === 'group';
 
@@ -252,14 +264,14 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
           </span>
         </div>
 
-        {/* Live Timer Sync Banner */}
+        {/* Authoritative Live Timer Sync Banner */}
         {isUnlocked && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 flex items-center justify-between shadow-md">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 flex items-center justify-between shadow-md">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
               <Clock className="w-4 h-4 text-cyan-400 animate-spin" />
               <span>PERFORMANCE TIMER</span>
             </div>
-            <span className={`font-mono text-xl font-black ${
+            <span className={`font-mono text-2xl font-black ${
               timeLeft < 60 ? 'text-amber-400 animate-pulse' : 'text-emerald-400'
             }`}>
               {formatTime(timeLeft)}
@@ -267,36 +279,39 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
           </div>
         )}
 
-        {/* Active Performer Details Header */}
+        {/* Active Performer Showcase Card (Live Glowing Ring) */}
         {activePerformer ? (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-2 relative overflow-hidden">
-            <div className="absolute top-0 right-0 px-3 py-1 bg-cyan-500/20 border-b border-l border-cyan-500/30 text-[10px] uppercase font-black text-cyan-300 rounded-bl-xl">
-              Now On Stage • #{activePerformer.performance_order || 1}
+          <div className="bg-cyan-950/40 border-2 border-cyan-500 rounded-3xl p-5 shadow-2xl space-y-2 relative overflow-hidden ring-4 ring-cyan-500/20">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase font-black tracking-widest text-cyan-300 bg-cyan-500/20 px-2 py-0.5 rounded-lg border border-cyan-400/40">
+                {(activePerformer.performance_type || 'Solo').toUpperCase()} ACT • #{activePerformer.performance_order || 1}
+              </span>
+              <span className="px-2.5 py-0.5 bg-red-500 text-slate-950 font-black text-[10px] rounded-full uppercase tracking-wider animate-pulse">
+                LIVE ON STAGE
+              </span>
             </div>
-            <span className="text-[10px] uppercase font-black tracking-widest text-cyan-400">
-              Category: {(activePerformer.performance_type || 'Solo').toUpperCase()}
-            </span>
-            <h2 className="text-xl font-black text-white truncate">
+
+            <h2 className="text-xl sm:text-2xl font-black text-white truncate pt-1">
               {activePerformer.participant_name || activePerformer.team_name || `${activePerformer.first_name || ''} ${activePerformer.last_name || ''}`.trim()}
             </h2>
-            <p className="text-xs text-slate-400 truncate">🏛️ {activePerformer.church_name || activePerformer.institution || 'Independent'}</p>
+            <p className="text-xs text-slate-300 truncate font-semibold">🏛️ {activePerformer.church_name || activePerformer.institution || 'Independent'}</p>
 
             {/* Special Instrumentalists on Group Act */}
             {isGroupAct && (activePerformer.best_keyboardist || activePerformer.best_rhythmist || activePerformer.best_guitarist) && (
-              <div className="pt-2 border-t border-slate-800/80 flex flex-wrap gap-2 text-[11px]">
+              <div className="pt-2 border-t border-cyan-500/30 flex flex-wrap gap-2 text-[11px]">
                 {activePerformer.best_keyboardist && (
-                  <span className="px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300">
-                    🎹 {activePerformer.best_keyboardist}
+                  <span className="px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold">
+                    🎹 Keys: {activePerformer.best_keyboardist}
                   </span>
                 )}
                 {activePerformer.best_rhythmist && (
-                  <span className="px-2 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300">
-                    🥁 {activePerformer.best_rhythmist}
+                  <span className="px-2 py-0.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 font-bold">
+                    🥁 Rhythm: {activePerformer.best_rhythmist}
                   </span>
                 )}
                 {activePerformer.best_guitarist && (
-                  <span className="px-2 py-0.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-300">
-                    🎸 {activePerformer.best_guitarist}
+                  <span className="px-2 py-0.5 rounded-lg bg-purple-500/15 border border-purple-500/30 text-purple-300 font-bold">
+                    🎸 Guitar: {activePerformer.best_guitarist}
                   </span>
                 )}
               </div>
@@ -308,7 +323,7 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
           </div>
         )}
 
-        {/* UP NEXT / ON DECK QUEUE VISIBILITY FOR JUDGES */}
+        {/* UP NEXT / ON DECK QUEUE PREVIEW */}
         {upcomingPerformers.length > 0 && (
           <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4 space-y-2.5">
             <div className="flex items-center justify-between text-xs font-bold text-slate-400">
@@ -361,24 +376,24 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
           </div>
         )}
 
-        {/* Dynamic Criteria Fields Defined by Event Creator */}
+        {/* Manual Direct Numeric Criteria Marks Inputs (Direct Typing) */}
         <div className={`space-y-4 transition-all duration-300 ${!isUnlocked || hashReceipt ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
           <div className="flex items-center justify-between px-1">
-            <span className="text-xs uppercase font-black tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Sliders className="w-4 h-4 text-cyan-400" />
-              <span>{(activePerformer?.performance_type || 'Vocal').toUpperCase()} CRITERIA (SET BY CREATOR)</span>
+            <span className="text-xs uppercase font-black tracking-wider text-slate-300 flex items-center gap-1.5">
+              <Edit3 className="w-4 h-4 text-cyan-400" />
+              <span>{(activePerformer?.performance_type || 'Vocal').toUpperCase()} CRITERIA (DIRECT MARKS INPUT)</span>
             </span>
             <span className="text-xs font-mono font-bold text-cyan-400">
               Subtotal: {vocalSubtotal.toFixed(1)} / {totalConfiguredMax}
             </span>
           </div>
 
-          {/* Render Each Creator-Configured Criterion Dynamically */}
+          {/* Dynamic Manual Marks Fields */}
           {criteriaList.map((crit, idx) => {
             const key = crit.id || `crit-${idx}`;
             const currentScore = criteriaScores[key] || 0;
             return (
-              <DynamicCriteriaTouchField
+              <ManualNumericScoreField
                 key={key}
                 name={crit.name}
                 description={crit.description}
@@ -389,7 +404,7 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
             );
           })}
 
-          {/* Special Accompanying Instrumentalists (Totaled ONLY during/after Group performance) */}
+          {/* Group Accompanying Instrumentalists (Evaluated ONLY during/after Group performance) */}
           {isGroupAct && (
             <div className="space-y-4 pt-4 border-t border-slate-800">
               <div className="flex items-center justify-between px-1">
@@ -403,9 +418,9 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
               </div>
 
               {activePerformer?.best_keyboardist && (
-                <DynamicCriteriaTouchField
+                <ManualNumericScoreField
                   name={`🎹 Keyboardist (${activePerformer.best_keyboardist})`}
-                  description="Technique, harmonization, chords & accompaniment skill"
+                  description="Harmonization, chords & keyboard accompaniment skill"
                   maxMarks={100}
                   value={keyboardistScore}
                   onChange={setKeyboardistScore}
@@ -413,7 +428,7 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
               )}
 
               {activePerformer?.best_rhythmist && (
-                <DynamicCriteriaTouchField
+                <ManualNumericScoreField
                   name={`🥁 Rhythmist (${activePerformer.best_rhythmist})`}
                   description="Octopad, drums, dholak, tabla rhythm, tempo hold & groove"
                   maxMarks={100}
@@ -423,9 +438,9 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
               )}
 
               {activePerformer?.best_guitarist && (
-                <DynamicCriteriaTouchField
+                <ManualNumericScoreField
                   name={`🎸 Guitarist (${activePerformer.best_guitarist})`}
-                  description="Lead, electric, bass guitar strumming, fills & dynamics"
+                  description="Lead, electric, bass guitar strumming & dynamics"
                   maxMarks={100}
                   value={guitaristScore}
                   onChange={setGuitaristScore}
@@ -476,8 +491,8 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
   );
 }
 
-// Reusable Dynamic Criteria Touch Stepper Field
-function DynamicCriteriaTouchField({
+// Direct Manual Numeric Input Component for Judges
+function ManualNumericScoreField({
   name,
   description,
   maxMarks,
@@ -490,53 +505,41 @@ function DynamicCriteriaTouchField({
   value: number;
   onChange: (v: number) => void;
 }) {
-  const step = (delta: number) => {
-    const updated = Math.max(0, Math.min(maxMarks, Math.round((value + delta) * 10) / 10));
-    onChange(updated);
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    if (raw === '') {
+      onChange(0);
+      return;
+    }
+    const num = parseFloat(raw);
+    if (!isNaN(num)) {
+      const clamped = Math.max(0, Math.min(maxMarks, Math.round(num * 10) / 10));
+      onChange(clamped);
+    }
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2 shadow-sm">
-      <div className="flex items-start justify-between gap-2">
-        <div>
+    <div className="bg-slate-900 border border-slate-800 focus-within:border-cyan-500 rounded-2xl p-4 space-y-2 shadow-sm transition-all">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
           <span className="text-xs font-black text-slate-200 tracking-wide block">{name}</span>
           {description && <p className="text-[10px] text-slate-400 leading-tight mt-0.5">{description}</p>}
         </div>
-        <div className="text-right shrink-0">
-          <span className="font-mono text-2xl font-black text-emerald-400">{value.toFixed(1)}</span>
-          <span className="text-[10px] text-slate-500 block">/ {maxMarks}</span>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-4 gap-2 pt-1">
-        <button
-          type="button"
-          onClick={() => step(-5)}
-          className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-xs font-bold text-slate-300 transition-colors cursor-pointer"
-        >
-          -5
-        </button>
-        <button
-          type="button"
-          onClick={() => step(-1)}
-          className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-xs font-bold text-slate-300 transition-colors cursor-pointer"
-        >
-          -1
-        </button>
-        <button
-          type="button"
-          onClick={() => step(+1)}
-          className="py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-xs font-bold text-slate-300 transition-colors cursor-pointer"
-        >
-          +1
-        </button>
-        <button
-          type="button"
-          onClick={() => step(+5)}
-          className="py-2.5 rounded-xl bg-cyan-600/30 hover:bg-cyan-600/40 active:bg-cyan-600/50 border border-cyan-500/40 text-xs font-black text-cyan-300 transition-colors cursor-pointer"
-        >
-          +5
-        </button>
+        {/* Direct Type-In Numeric Input */}
+        <div className="flex items-center gap-1.5 shrink-0 bg-slate-950 p-1.5 rounded-xl border border-slate-800 focus-within:border-emerald-400">
+          <input
+            type="number"
+            min={0}
+            max={maxMarks}
+            step="0.5"
+            value={value === 0 ? '' : value}
+            onChange={handleInputChange}
+            placeholder="0"
+            className="w-16 bg-transparent text-right font-mono text-2xl font-black text-emerald-400 focus:outline-none placeholder-slate-700"
+          />
+          <span className="text-[11px] text-slate-500 font-bold pr-1">/ {maxMarks}</span>
+        </div>
       </div>
     </div>
   );

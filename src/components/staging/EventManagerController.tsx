@@ -1,9 +1,10 @@
 'use client';
 
-// src/components/staging/EventManagerController.tsx
+// src/components/staging/EventManagerController.tsx - Stage Manager Console with Wall-Clock Timer & Queue Color States
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { updateParticipantDetails, deleteParticipant } from '@/actions/participants';
+import { getEventCriteria, TimeSlotConfig } from '@/actions/criteria';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import { 
   Play, 
@@ -16,7 +17,6 @@ import {
   Clock, 
   AlertTriangle, 
   CheckCircle2, 
-  RotateCcw,
   Sparkles,
   Edit2,
   Trash2,
@@ -46,13 +46,20 @@ interface EventState {
   timer_status: 'idle' | 'running' | 'paused' | 'stopped' | 'overtime';
   timer_duration_seconds: number;
   timer_elapsed_seconds: number;
+  timer_started_at: string | null;
   is_judge_input_unlocked: boolean;
   current_category: string;
 }
 
 export function EventManagerController({ eventId }: { eventId: string }) {
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
   const [state, setState] = useState<EventState | null>(null);
+  const [timeSlots, setTimeSlots] = useState<TimeSlotConfig>({
+    soloDurationSeconds: 240,
+    duetDurationSeconds: 300,
+    groupDurationSeconds: 480,
+  });
   const [timeLeft, setTimeLeft] = useState<number>(300);
   const [activePerformer, setActivePerformer] = useState<Participant | null>(null);
   const [submittedJudgeCount, setSubmittedJudgeCount] = useState<number>(0);
@@ -79,19 +86,50 @@ export function EventManagerController({ eventId }: { eventId: string }) {
     performanceOrder: 1,
   });
 
-  // 1. Initial Fetch
+  // Confirmation Dialog State
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel: string;
+    variant: 'danger' | 'warning' | 'primary';
+    action: () => Promise<void>;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmLabel: 'Yes, Proceed',
+    variant: 'danger',
+    action: async () => {},
+  });
+
+  // 1. Initial Fetch & Category Time Slots Load
   const loadData = useCallback(async () => {
-    const [{ data: pList }, { data: st }] = await Promise.all([
+    const [{ data: pList }, { data: st }, { data: scoredRows }] = await Promise.all([
       supabase.from('participants').select('*').eq('competition_id', eventId).order('performance_order'),
       supabase.from('event_state').select('*').eq('event_id', eventId).maybeSingle(),
+      supabase.from('scores').select('participant_id').eq('event_id', eventId),
     ]);
 
+    // Load category time slots configured by creator
+    try {
+      const config = await getEventCriteria(eventId);
+      if (config?.timeSlots) {
+        setTimeSlots(config.timeSlots);
+      }
+    } catch (e) {
+      console.error('Failed to load time slots:', e);
+    }
+
     if (pList) setParticipants(pList);
+    if (scoredRows) {
+      setCompletedIds(new Set(scoredRows.map((s) => s.participant_id)));
+    }
+
     if (st) {
       setState(st);
       const active = pList?.find((p) => p.id === st.active_participant_id) || null;
       setActivePerformer(active);
-      setTimeLeft(st.timer_duration_seconds - Math.floor(st.timer_elapsed_seconds || 0));
     }
   }, [eventId]);
 
@@ -115,8 +153,11 @@ export function EventManagerController({ eventId }: { eventId: string }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'participants', filter: `competition_id=eq.${eventId}` }, () => {
         loadData();
       })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'scores', filter: `event_id=eq.${eventId}` }, () => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'scores', filter: `event_id=eq.${eventId}` }, (payload: any) => {
         setSubmittedJudgeCount((c) => c + 1);
+        if (payload?.new?.participant_id) {
+          setCompletedIds((prev) => new Set([...prev, payload.new.participant_id]));
+        }
       })
       .subscribe();
 
@@ -125,21 +166,30 @@ export function EventManagerController({ eventId }: { eventId: string }) {
     };
   }, [eventId, loadData]);
 
-  // 3. Local Countdown Ticker
+  // 3. Tab-Change Resilient Authoritative Wall-Clock Timer
   useEffect(() => {
-    if (state?.stage_mode !== 'live' || state?.timer_status !== 'running') return;
+    if (state?.stage_mode !== 'live' || state?.timer_status !== 'running') {
+      if (state?.timer_duration_seconds) {
+        setTimeLeft(state.timer_duration_seconds - Math.floor(state.timer_elapsed_seconds || 0));
+      }
+      return;
+    }
 
+    const calcRemaining = () => {
+      if (!state?.timer_started_at) return state?.timer_duration_seconds || 300;
+      const startedMs = new Date(state.timer_started_at).getTime();
+      const elapsedSecs = Math.floor((Date.now() - startedMs) / 1000);
+      const totalDur = state.timer_duration_seconds || 300;
+      return Math.max(0, totalDur - elapsedSecs);
+    };
+
+    setTimeLeft(calcRemaining());
     const interval = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          return 0;
-        }
-        return prev - 1;
-      });
+      setTimeLeft(calcRemaining());
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [state?.stage_mode, state?.timer_status]);
+  }, [state?.stage_mode, state?.timer_status, state?.timer_started_at, state?.timer_duration_seconds]);
 
   // 4. Staging Controls
   const setStageMode = async (mode: 'standby' | 'live' | 'completed', unlockJudges = false) => {
@@ -158,17 +208,27 @@ export function EventManagerController({ eventId }: { eventId: string }) {
   const selectActivePerformer = async (p: Participant) => {
     setIsUpdating(true);
     setSubmittedJudgeCount(0);
-    setTimeLeft(state?.timer_duration_seconds || 300);
+
+    // Pick duration configured for this act format
+    let targetDuration = timeSlots.soloDurationSeconds;
+    if (p.performance_type === 'duet') targetDuration = timeSlots.duetDurationSeconds;
+    else if (p.performance_type === 'group') targetDuration = timeSlots.groupDurationSeconds;
+
+    setTimeLeft(targetDuration);
+
     await supabase.from('event_state').upsert({
       event_id: eventId,
       active_participant_id: p.id,
       stage_mode: 'standby',
       is_judge_input_unlocked: false,
       timer_status: 'idle',
+      timer_duration_seconds: targetDuration,
       timer_elapsed_seconds: 0,
+      timer_started_at: null,
       current_category: p.performance_type,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'event_id' });
+
     setIsUpdating(false);
   };
 
@@ -241,22 +301,6 @@ export function EventManagerController({ eventId }: { eventId: string }) {
       setIsUpdating(false);
     }
   };
-
-  const [confirmDialog, setConfirmDialog] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    confirmLabel: string;
-    variant: 'danger' | 'warning' | 'primary';
-    action: () => Promise<void>;
-  }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    confirmLabel: 'Yes, Proceed',
-    variant: 'danger',
-    action: async () => {},
-  });
 
   const handleDeletePerformer = (id: string, name: string) => {
     setConfirmDialog({
@@ -423,12 +467,14 @@ export function EventManagerController({ eventId }: { eventId: string }) {
         </div>
       </div>
 
-      {/* Performer Queue Section */}
+      {/* Performer Queue Section with Distinct Color States */}
       <div className="space-y-4 pt-4 border-t border-slate-800">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h3 className="text-lg font-bold text-slate-200">Staging Queue</h3>
-            <p className="text-xs text-slate-400">Select any act to place them on deck for the live stage.</p>
+            <p className="text-xs text-slate-400">
+              Color Legend: <span className="text-cyan-400 font-bold">Cyan (Live on Stage)</span> • <span className="text-emerald-400 font-bold">Green (Completed & Scored)</span> • <span className="text-slate-400 font-bold">Slate (Queued)</span>
+            </p>
           </div>
           <button
             onClick={() => {
@@ -457,12 +503,16 @@ export function EventManagerController({ eventId }: { eventId: string }) {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {participants.map((p) => {
               const isActive = activePerformer?.id === p.id;
+              const isCompleted = completedIds.has(p.id);
+
               return (
                 <div
                   key={p.id}
-                  className={`p-4 rounded-xl border text-left transition-all relative ${
+                  className={`p-4 rounded-2xl border text-left transition-all relative ${
                     isActive
-                      ? 'bg-cyan-950/40 border-cyan-500/80 shadow-lg shadow-cyan-950/50 ring-1 ring-cyan-500'
+                      ? 'bg-cyan-950/60 border-cyan-400 shadow-xl shadow-cyan-950/60 ring-2 ring-cyan-400'
+                      : isCompleted
+                      ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-300'
                       : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
                   }`}
                 >
@@ -478,6 +528,16 @@ export function EventManagerController({ eventId }: { eventId: string }) {
                         <span className="text-[10px] uppercase font-bold text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20">
                           {p.performance_type}
                         </span>
+                        {isActive && (
+                          <span className="text-[10px] font-black uppercase text-red-400 bg-red-500/20 px-1.5 py-0.5 rounded border border-red-500/30 animate-pulse">
+                            ON STAGE
+                          </span>
+                        )}
+                        {isCompleted && !isActive && (
+                          <span className="text-[10px] font-bold uppercase text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> Scored
+                          </span>
+                        )}
                       </div>
                       <div className="font-bold text-sm text-white truncate">
                         {p.participant_name || p.team_name || `${p.first_name || ''} ${p.last_name || ''}`.trim()}
