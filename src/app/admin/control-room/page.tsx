@@ -6,7 +6,7 @@ import React, { useEffect, useState } from 'react';
 import { Navbar } from '@/components/layout/Navbar';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { supabase } from '@/lib/supabase/client';
-import { Category, Performance, JudgeAssignment, TimerState, ScoreSubmission } from '@/types';
+import { Category, Performance, JudgeAssignment, TimerState, ScoreSubmission, Result, ResultEntry } from '@/types';
 import { computeTimerDisplay } from '@/lib/timer/authoritativeTimer';
 import { controlTimer, advancePerformanceSlot } from '@/actions/timer';
 import { reopenScore } from '@/actions/scoring';
@@ -28,6 +28,7 @@ import {
   Unlock,
   Settings2,
   FastForward,
+  Table,
 } from 'lucide-react';
 
 export default function LiveControlRoomPage() {
@@ -52,7 +53,9 @@ export default function LiveControlRoomPage() {
   const [reopenTarget, setReopenTarget] = useState<ScoreSubmission | null>(null);
   const [reopenReason, setReopenReason] = useState('');
   const [calculating, setCalculating] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [calculatedResults, setCalculatedResults] = useState<Result | null>(null);
 
   // 1. Fetch categories
   useEffect(() => {
@@ -94,7 +97,7 @@ export default function LiveControlRoomPage() {
         const roundId = rounds[0].id;
         const { data: perfs } = await supabase
           .from('performances')
-          .select('*, participant:participants(*), team:teams(*), timer:timers(*)')
+          .select('*, participant:participants(*), team:teams(*)')
           .eq('round_id', roundId)
           .order('performance_order');
 
@@ -107,10 +110,6 @@ export default function LiveControlRoomPage() {
             performanceOrder: p.performance_order,
             performanceCode: p.performance_code,
             status: p.status,
-            startedAt: p.started_at,
-            completedAt: p.completed_at,
-            createdAt: p.created_at,
-            updatedAt: p.updated_at,
             participant: p.participant ? {
               id: p.participant.id,
               competitionId: p.participant.competition_id,
@@ -118,10 +117,8 @@ export default function LiveControlRoomPage() {
               firstName: p.participant.first_name,
               lastName: p.participant.last_name,
               institution: p.participant.institution,
-              contactEmail: p.participant.contact_email,
-              contactPhone: p.participant.contact_phone,
               environment: p.participant.environment,
-            } : undefined,
+            } : null,
             team: p.team ? {
               id: p.team.id,
               competitionId: p.team.competition_id,
@@ -129,40 +126,93 @@ export default function LiveControlRoomPage() {
               name: p.team.name,
               institution: p.team.institution,
               environment: p.team.environment,
-            } : undefined,
+            } : null,
           }));
           setPerformances(mappedPerfs as any);
           setCurrentPerfIndex(0);
         }
       }
 
-      // Fetch assigned judges
+      // Fetch judges assigned to category
       const { data: judgeData } = await supabase
-        .from('judge_assignments')
-        .select('*, judge:profiles(*)')
+        .from('category_judges')
+        .select('*, judge:profiles!category_judges_judge_id_fkey(*)')
         .eq('category_id', selectedCategory!.id)
-        .eq('is_active', true)
         .order('judge_seat_number');
 
       if (judgeData) {
         const mappedJudges = judgeData.map((j: any) => ({
           id: j.id,
-          competitionId: j.competition_id,
           categoryId: j.category_id,
           judgeId: j.judge_id,
           judgeSeatNumber: j.judge_seat_number,
-          isActive: j.is_active,
-          assignedAt: j.assigned_at,
+          isChiefJudge: j.is_chief_judge,
           judge: j.judge ? {
             id: j.judge.id,
-            email: j.judge.email,
             fullName: j.judge.full_name,
-            phoneNumber: j.judge.phone_number,
-            avatarUrl: j.judge.avatar_url,
-            isActive: j.judge.is_active,
-          } : undefined,
+            email: j.judge.email,
+          } : null,
         }));
         setJudges(mappedJudges as any);
+      }
+
+      // Fetch existing results if already computed
+      const { data: existingRes } = await supabase
+        .from('results')
+        .select('*, entries:result_entries(*, performance:performances(*, participant:participants(*), team:teams(*)))')
+        .eq('category_id', selectedCategory!.id)
+        .maybeSingle();
+
+      if (existingRes) {
+        setCalculatedResults({
+          id: existingRes.id,
+          categoryId: existingRes.category_id,
+          roundId: existingRes.round_id,
+          status: existingRes.status,
+          approvedBy: existingRes.approved_by,
+          approvedAt: existingRes.approved_at,
+          publishedAt: existingRes.published_at,
+          createdAt: existingRes.created_at,
+          updatedAt: existingRes.updated_at,
+          entries: (existingRes.entries || []).map((e: any) => ({
+            id: e.id,
+            resultId: e.result_id,
+            performanceId: e.performance_id,
+            rank: e.rank,
+            finalScore: Number(e.final_score),
+            judgeCount: e.judge_count,
+            rawAverage: Number(e.raw_average),
+            standardDeviation: Number(e.standard_deviation),
+            breakdownJson: e.breakdown_json,
+            isTie: e.is_tie,
+            tieResolutionNote: e.tie_resolution_note,
+            performance: e.performance ? {
+              id: e.performance.id,
+              roundId: e.performance.round_id,
+              participantId: e.performance.participant_id,
+              teamId: e.performance.team_id,
+              performanceOrder: e.performance.performance_order,
+              performanceCode: e.performance.performance_code,
+              status: e.performance.status,
+              participant: e.performance.participant ? {
+                id: e.performance.participant.id,
+                firstName: e.performance.participant.first_name,
+                lastName: e.performance.participant.last_name,
+                institution: e.performance.participant.institution,
+                participantCode: e.performance.participant.participant_code,
+              } : null,
+              team: e.performance.team ? {
+                id: e.performance.team.id,
+                name: e.performance.team.name,
+                teamCode: e.performance.team.team_code,
+                institution: e.performance.team.institution,
+              } : null,
+            } : null,
+            createdAt: e.created_at,
+          })).sort((a: ResultEntry, b: ResultEntry) => a.rank - b.rank),
+        });
+      } else {
+        setCalculatedResults(null);
       }
     }
 
@@ -378,11 +428,27 @@ export default function LiveControlRoomPage() {
         selectedCategory.id,
         currentPerformance.roundId
       );
-      setStatusMessage(`Results computed successfully for ${res.entries.length} participants!`);
+      setCalculatedResults(res as any);
+      setStatusMessage(`Official Master Judgment Sheet computed for ${res.entries.length} participants!`);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Calculation error');
     } finally {
       setCalculating(false);
+    }
+  };
+
+  // Publish to Public Scoreboard
+  const handlePublishResults = async () => {
+    if (!calculatedResults) return;
+    try {
+      setPublishing(true);
+      await publishResults(calculatedResults.id);
+      setCalculatedResults((prev) => (prev ? { ...prev, status: 'published', publishedAt: new Date().toISOString() } : null));
+      setStatusMessage('Official Master Judgment Sheet & Standings published to Live Scoreboard!');
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to publish results');
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -712,6 +778,151 @@ export default function LiveControlRoomPage() {
             </div>
           </div>
         </div>
+
+        {/* Live Audited Master Judgement Sheet Preview */}
+        {calculatedResults && calculatedResults.entries.length > 0 && (
+          <div className="mt-8 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/40">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center">
+                  <Calculator className="w-4 h-4 text-indigo-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                    <span>Live Master Judgement Sheet</span>
+                    <span
+                      className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded border ${
+                        calculatedResults.status === 'published'
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                      }`}
+                    >
+                      {calculatedResults.status === 'published' ? 'PUBLISHED LIVE' : 'DRAFT AUDIT'}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Category: {selectedCategory?.name} • Total Ranked: {calculatedResults.entries.length} Performers
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCalculateCategory}
+                  disabled={calculating}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 border border-slate-700 transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Recalculate</span>
+                </button>
+
+                {calculatedResults.status !== 'published' ? (
+                  <button
+                    type="button"
+                    onClick={handlePublishResults}
+                    disabled={publishing}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 transition-colors cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{publishing ? 'Publishing...' : 'Publish to Live Scoreboard'}</span>
+                  </button>
+                ) : (
+                  <div className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center gap-1.5 font-mono">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Published to Live Scoreboard</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Results Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-950 text-[11px] uppercase font-bold text-slate-400 tracking-wider border-b border-slate-800">
+                  <tr>
+                    <th className="px-6 py-3.5">Rank</th>
+                    <th className="px-6 py-3.5">Participant / Team</th>
+                    <th className="px-6 py-3.5">Code</th>
+                    <th className="px-6 py-3.5 text-center">Judges Marks Panel</th>
+                    <th className="px-6 py-3.5 text-right">Raw Avg</th>
+                    <th className="px-6 py-3.5 text-right">Variance (σ)</th>
+                    <th className="px-6 py-3.5 text-right">Final Score</th>
+                    <th className="px-6 py-3.5 text-center">Tie Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 font-medium">
+                  {calculatedResults.entries.map((entry) => {
+                    const name = entry.performance?.participant
+                      ? `${entry.performance.participant.firstName} ${entry.performance.participant.lastName}`
+                      : entry.performance?.team?.name || 'Performer';
+                    const code = entry.performance?.participant?.participantCode || entry.performance?.performanceCode;
+                    const judgeScores: any[] = entry.breakdownJson?.judgeScores || [];
+
+                    return (
+                      <tr key={entry.id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="px-6 py-4 font-bold font-mono">
+                          <span
+                            className={`px-2.5 py-1 rounded-lg text-xs ${
+                              entry.rank === 1
+                                ? 'bg-amber-500/20 text-amber-300 font-black'
+                                : entry.rank === 2
+                                ? 'bg-slate-700 text-slate-200'
+                                : entry.rank === 3
+                                ? 'bg-amber-900/30 text-amber-400'
+                                : 'text-slate-400'
+                            }`}
+                          >
+                            #{entry.rank}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-white">
+                          <div className="font-semibold">{name}</div>
+                          {entry.performance?.participant?.institution && (
+                            <div className="text-xs text-slate-400">{entry.performance.participant.institution}</div>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 font-mono text-xs text-slate-400">{code}</td>
+                        <td className="px-6 py-4 text-center">
+                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                            {judgeScores.map((j: any, idx: number) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] font-mono text-slate-300"
+                                title={`Seat ${j.judgeSeat}: ${j.weightedTotal.toFixed(2)}`}
+                              >
+                                J{j.judgeSeat}: <strong className="text-white">{j.weightedTotal.toFixed(1)}</strong>
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-right font-mono text-xs text-slate-300">
+                          {entry.rawAverage.toFixed(2)}
+                        </td>
+                        <td className="px-6 py-4 text-right font-mono text-xs text-slate-400">
+                          ±{entry.standardDeviation.toFixed(2)}
+                        </td>
+                        <td className="px-6 py-4 text-right font-mono font-bold text-base text-indigo-400">
+                          {entry.finalScore.toFixed(3)}
+                        </td>
+                        <td className="px-6 py-4 text-center text-xs">
+                          {entry.isTie ? (
+                            <span className="text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 font-mono text-[10px]">
+                              {entry.tieResolutionNote || 'Tie Resolved'}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 text-xs">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Score Reopen Modal Dialog */}
         {reopenTarget && (

@@ -269,7 +269,7 @@ export interface ResultEntry {
   };
   isTie: boolean;
   tieResolutionNote?: string | null;
-  performance?: Performance;
+  performance?: Performance | null;
   createdAt: string;
 }
 
