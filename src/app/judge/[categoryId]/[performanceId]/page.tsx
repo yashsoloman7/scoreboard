@@ -233,6 +233,8 @@ export default function JudgeScoringConsolePage({
         setMaskedFields(allMasked);
         offlineDraftStore.clearDraft(performanceId);
         setFeedback({ type: 'success', message: 'Score successfully recorded and locked!' });
+      } else {
+        setFeedback({ type: 'error', message: res.error || 'Submission failed' });
       }
     } catch (err: unknown) {
       setFeedback({ type: 'error', message: err instanceof Error ? err.message : 'Submission failed' });

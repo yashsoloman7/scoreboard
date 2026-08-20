@@ -90,7 +90,7 @@ export async function calculateAndStoreCategoryResults(
       round_id: roundId,
       status: 'draft',
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'category_id, round_id' })
+    }, { onConflict: 'category_id,round_id' })
     .select()
     .single();
 
