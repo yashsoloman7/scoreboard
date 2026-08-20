@@ -36,7 +36,22 @@ export default function AdminDashboardPage() {
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (compData) setCompetitions(compData as any);
+        if (compData) {
+          setCompetitions(compData.map((c: any) => ({
+            id: c.id,
+            code: c.code,
+            name: c.name,
+            description: c.description,
+            venue: c.venue,
+            startDate: c.start_date,
+            endDate: c.end_date,
+            status: c.status,
+            environment: c.environment,
+            createdBy: c.created_by,
+            createdAt: c.created_at,
+            updatedAt: c.updated_at,
+          })));
+        }
 
         const { data: profiles } = await supabase
           .from('profiles')

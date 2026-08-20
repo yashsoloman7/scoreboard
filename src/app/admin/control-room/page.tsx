@@ -54,9 +54,16 @@ export default function LiveControlRoomPage() {
     async function loadCategories() {
       const { data } = await supabase.from('categories').select('*').order('display_order');
       if (data && data.length > 0) {
-        const mappedCategories = data.map(c => ({
-          ...c,
-          performerType: c.performer_type
+        const mappedCategories = data.map((c: any) => ({
+          id: c.id,
+          competitionId: c.competition_id,
+          name: c.name,
+          performerType: c.performer_type || 'solo',
+          displayOrder: c.display_order,
+          scoringFormula: c.scoring_formula,
+          status: c.status,
+          createdAt: c.created_at,
+          updatedAt: c.updated_at,
         }));
         setCategories(mappedCategories as any);
         setSelectedCategory(mappedCategories[0] as any);
@@ -87,7 +94,39 @@ export default function LiveControlRoomPage() {
           .order('performance_order');
 
         if (perfs) {
-          setPerformances(perfs as any);
+          const mappedPerfs = perfs.map((p: any) => ({
+            id: p.id,
+            roundId: p.round_id,
+            participantId: p.participant_id,
+            teamId: p.team_id,
+            performanceOrder: p.performance_order,
+            performanceCode: p.performance_code,
+            status: p.status,
+            startedAt: p.started_at,
+            completedAt: p.completed_at,
+            createdAt: p.created_at,
+            updatedAt: p.updated_at,
+            participant: p.participant ? {
+              id: p.participant.id,
+              competitionId: p.participant.competition_id,
+              participantCode: p.participant.participant_code,
+              firstName: p.participant.first_name,
+              lastName: p.participant.last_name,
+              institution: p.participant.institution,
+              contactEmail: p.participant.contact_email,
+              contactPhone: p.participant.contact_phone,
+              environment: p.participant.environment,
+            } : undefined,
+            team: p.team ? {
+              id: p.team.id,
+              competitionId: p.team.competition_id,
+              teamCode: p.team.team_code,
+              name: p.team.name,
+              institution: p.team.institution,
+              environment: p.team.environment,
+            } : undefined,
+          }));
+          setPerformances(mappedPerfs as any);
           setCurrentPerfIndex(0);
         }
       }
@@ -101,7 +140,24 @@ export default function LiveControlRoomPage() {
         .order('judge_seat_number');
 
       if (judgeData) {
-        setJudges(judgeData as any);
+        const mappedJudges = judgeData.map((j: any) => ({
+          id: j.id,
+          competitionId: j.competition_id,
+          categoryId: j.category_id,
+          judgeId: j.judge_id,
+          judgeSeatNumber: j.judge_seat_number,
+          isActive: j.is_active,
+          assignedAt: j.assigned_at,
+          judge: j.judge ? {
+            id: j.judge.id,
+            email: j.judge.email,
+            fullName: j.judge.full_name,
+            phoneNumber: j.judge.phone_number,
+            avatarUrl: j.judge.avatar_url,
+            isActive: j.judge.is_active,
+          } : undefined,
+        }));
+        setJudges(mappedJudges as any);
       }
     }
 
@@ -282,7 +338,7 @@ export default function LiveControlRoomPage() {
             >
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} ({c.performerType.toUpperCase()})
+                  {c.name} ({(c.performerType || (c as any).performer_type || 'solo').toUpperCase()})
                 </option>
               ))}
             </select>
