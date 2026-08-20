@@ -108,9 +108,13 @@ export async function createCompetition(formData: unknown) {
     throw new Error(`Failed to create competition: ${compError.message}`);
   }
 
-  // Insert default settings
+  // Insert default settings with event password / publish passcode
+  const rawForm = (typeof formData === 'object' && formData !== null) ? (formData as any) : {};
+  const eventPasscode = rawForm.eventPassword || rawForm.publishPasscode || null;
+
   await supabase.from('competition_settings').insert({
     competition_id: comp.id,
+    publish_passcode: eventPasscode,
   });
 
   // Initialize competition state

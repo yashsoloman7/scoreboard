@@ -1,20 +1,16 @@
-// src/lib/importers/participantImporter.ts - Google Form & CSV Participant/Church Parser & Validator
+'use server';
 
-import { ParticipantImportRowSchema, TeamImportRowSchema } from '../validation/schemas';
-import * as XLSX from 'xlsx';
+// src/lib/importers/participantImporter.ts - Comprehensive Google Sheets, CSV & Form Importer
 import Papa from 'papaparse';
-
-export interface ImportValidationResult<T> {
-  validRows: T[];
-  invalidRows: { rowNumber: number; data: Record<string, unknown>; errors: string[] }[];
-  duplicates: { rowNumber: number; code: string }[];
-  totalRows: number;
-}
+import * as XLSX from 'xlsx';
+import { ParticipantImportRowSchema } from '../validation/schemas';
 
 export interface ParsedParticipantRow {
-  participantCode: string;
+  participantCode?: string;
   firstName?: string;
   lastName?: string;
+  duetParticipant1?: string;
+  duetParticipant2?: string;
   teamName?: string | null;
   churchName?: string | null;
   participantName?: string | null;
@@ -29,6 +25,23 @@ export interface ParsedParticipantRow {
   performanceOrder?: number;
 }
 
+export interface ParsedTeamRow {
+  teamCode: string;
+  teamName: string;
+  churchName?: string | null;
+  institution?: string | null;
+  categoryName?: string;
+  performanceOrder?: number;
+  members?: { firstName: string; lastName: string; role: string; contactEmail?: string | null }[];
+}
+
+export interface ImportValidationResult<T> {
+  validRows: T[];
+  invalidRows: { rowNumber: number; data: unknown; errors: string[] }[];
+  duplicates: string[];
+  totalProcessed: number;
+}
+
 export interface GoogleFormChurchRegistration {
   rowNumber: number;
   performanceOrder?: number;
@@ -40,7 +53,7 @@ export interface GoogleFormChurchRegistration {
   soloParticipantName?: string;
   duetParticipant1?: string;
   duetParticipant2?: string;
-  instrumentPlayersText?: string;
+  duetCombinedName?: string;
   // Specific Instruments
   keyboardist?: string | null;
   harmonium?: string | null;
@@ -59,16 +72,6 @@ export interface GoogleFormChurchRegistration {
   bestGuitarist?: string | null;
   numberOfParticipants?: number;
   numberOfExtraPersons?: number;
-}
-
-export interface ParsedTeamRow {
-  teamCode: string;
-  teamName: string;
-  churchName?: string | null;
-  institution?: string | null;
-  categoryName?: string;
-  performanceOrder?: number;
-  members?: { firstName: string; lastName: string; role: string; contactEmail?: string | null }[];
 }
 
 /**
@@ -110,7 +113,6 @@ export function extractInstrumentalists(rawText?: string | null): {
     }
   }
 
-  // Fallback: If segments didn't match keywords, map first 3 segments if present
   if (!keyboardist && !rhythmist && !guitarist && segments.length > 0) {
     if (segments[0]) keyboardist = segments[0];
     if (segments[1]) rhythmist = segments[1];
@@ -131,8 +133,9 @@ function normalizeRowKeys(row: Record<string, unknown>, index = 0): Record<strin
     const strVal = String(value ?? '').trim();
     
     // 1. Serial / Order
-    if (['sno', 'slno', 'sno.', 'serialno', 'order', 'performanceorder', 'seq', 'slot'].includes(lowerKey)) {
+    if (['sno', 'slno', 'sno.', 'serialno', 'order', 'performanceorder', 'seq', 'slot', 'chestnumber', 'chestno', 'code', 'participantcode'].includes(lowerKey)) {
       normalized['performanceOrder'] = Number(strVal) || index + 1;
+      normalized['participantCode'] = strVal;
     }
     // 2. Church / Team Name
     else if (['churchname', 'church', 'parish', 'congregation'].includes(lowerKey)) {
@@ -154,11 +157,20 @@ function normalizeRowKeys(row: Record<string, unknown>, index = 0): Record<strin
       normalized['firstName'] = parts[0] || '';
       normalized['lastName'] = parts.slice(1).join(' ') || '';
     }
-    // 4. Duet Participant
-    else if (['duetname', 'duetparticipantname', 'duetparticipantname1', 'duetparticpantname1', 'duetperformer1', 'duet1', 'duet'].includes(lowerKey)) {
+    // 4. Duet Participants
+    else if (['duetparticipantname1', 'duetparticpantname1', 'duetperformer1', 'duet1', 'duetparticipant1'].includes(lowerKey)) {
       normalized['duetParticipant1'] = strVal;
-    } else if (['duetparticipantname2', 'duetparticpantname2', 'duetperformer2', 'duet2'].includes(lowerKey)) {
+    } else if (['duetparticipantname2', 'duetparticpantname2', 'duetperformer2', 'duet2', 'duetparticipant2'].includes(lowerKey)) {
       normalized['duetParticipant2'] = strVal;
+    } else if (['duetname', 'duetparticipantname', 'duet', 'duetpair', 'duetmembers'].includes(lowerKey)) {
+      normalized['duetParticipant1'] = strVal;
+      if (strVal.includes('&') || strVal.toLowerCase().includes(' and ') || strVal.includes('/')) {
+        const parts = strVal.split(/\s*(&|\band\b|\/)\s*/i).filter((p) => p && !['&', 'and', '/'].includes(p.toLowerCase()));
+        if (parts.length >= 2) {
+          normalized['duetSinger1'] = parts[0].trim();
+          normalized['duetSinger2'] = parts[1].trim();
+        }
+      }
     }
     // 5. Leader / Pastor
     else if (['choirleadername', 'choirleader', 'leadername', 'leader'].includes(lowerKey)) {
@@ -166,7 +178,7 @@ function normalizeRowKeys(row: Record<string, unknown>, index = 0): Record<strin
     } else if (['pastorfathername', 'pastorname', 'fathername', 'pastor', 'father'].includes(lowerKey)) {
       normalized['pastorName'] = strVal;
     }
-    // 6. Specific Instrument Columns & Awards
+    // 6. Specific Instrument Columns
     else if (['bestkeyboardist', 'keyboard', 'keys', 'pianist', 'piano'].includes(lowerKey)) {
       normalized['keyboardist'] = strVal || null;
       normalized['bestKeyboardist'] = strVal || null;
@@ -216,37 +228,35 @@ function normalizeRowKeys(row: Record<string, unknown>, index = 0): Record<strin
         normalized['bestGuitarist'] = instruments.guitarist;
       }
     }
-    // 8. General Participant Fields
-    else if (['name', 'fullname', 'performername', 'performer', 'participant', 'participantname'].includes(lowerKey)) {
-      normalized['participantName'] = strVal;
-      const parts = strVal.split(' ');
-      normalized['firstName'] = parts[0] || '';
-      normalized['lastName'] = parts.slice(1).join(' ') || '';
-    } else if (['firstname', 'first'].includes(lowerKey)) {
+    // 8. General Names
+    else if (['firstname', 'first'].includes(lowerKey)) {
       normalized['firstName'] = strVal;
     } else if (['lastname', 'last', 'surname'].includes(lowerKey)) {
       normalized['lastName'] = strVal;
-    } else if (['code', 'participantcode', 'bib', 'chestno', 'chestnumber', 'id', 'rollno'].includes(lowerKey)) {
-      normalized['participantCode'] = strVal;
-      normalized['teamCode'] = strVal;
-    } else if (['type', 'performancetype', 'eventtype', 'format'].includes(lowerKey)) {
-      const typeVal = strVal.toLowerCase();
-      if (typeVal.includes('duet')) normalized['performanceType'] = 'duet';
-      else if (typeVal.includes('group') || typeVal.includes('choir') || typeVal.includes('band')) normalized['performanceType'] = 'group';
-      else normalized['performanceType'] = 'solo';
-    } else if (['noofparticipants', 'noofparticpants', 'participantscount', 'count'].includes(lowerKey)) {
-      normalized['numberOfParticipants'] = Number(strVal) || undefined;
-    } else if (['noofextraperson', 'extrapersons', 'extra'].includes(lowerKey)) {
-      normalized['numberOfExtraPersons'] = Number(strVal) || undefined;
-    } else if (['timestamp', 'time'].includes(lowerKey)) {
-      normalized['timestamp'] = strVal;
-    } else if (['emailaddress', 'email', 'contactemail'].includes(lowerKey)) {
+    } else if (['name', 'fullname', 'performername', 'performer', 'participant', 'participantname'].includes(lowerKey)) {
+      normalized['participantName'] = strVal;
+      const parts = strVal.split(' ');
+      if (!normalized['firstName']) normalized['firstName'] = parts[0] || '';
+      if (!normalized['lastName']) normalized['lastName'] = parts.slice(1).join(' ') || '';
+    }
+    // 9. Contact Info
+    else if (['email', 'emailaddress', 'contactemail', 'mail'].includes(lowerKey)) {
       normalized['contactEmail'] = strVal;
-      normalized['email'] = strVal;
-    } else if (['phone', 'contactphone', 'mobile'].includes(lowerKey)) {
+    } else if (['phone', 'contactphone', 'mobile', 'cell'].includes(lowerKey)) {
       normalized['contactPhone'] = strVal;
-    } else if (['category', 'categoryname', 'event'].includes(lowerKey)) {
+    }
+    // 10. Counts
+    else if (['noofparticpants', 'noofparticipants', 'numberofparticipants', 'totalparticipants', 'participants'].includes(lowerKey)) {
+      normalized['numberOfParticipants'] = Number(strVal) || undefined;
+    } else if (['noofextraperson', 'numberofextraperson', 'extraperson', 'extrapersons'].includes(lowerKey)) {
+      normalized['numberOfExtraPersons'] = Number(strVal) || undefined;
+    } else if (['category', 'categoryname'].includes(lowerKey)) {
       normalized['categoryName'] = strVal;
+    } else if (['performancetype', 'type'].includes(lowerKey)) {
+      const typeLower = strVal.toLowerCase();
+      if (typeLower.includes('duet')) normalized['performanceType'] = 'duet';
+      else if (typeLower.includes('group') || typeLower.includes('choir') || typeLower.includes('band')) normalized['performanceType'] = 'group';
+      else normalized['performanceType'] = 'solo';
     } else {
       normalized[cleanKey] = value;
     }
@@ -291,6 +301,74 @@ function normalizeRowKeys(row: Record<string, unknown>, index = 0): Record<strin
 }
 
 /**
+ * Standard CSV/Excel Parser for generic participant imports
+ */
+export function parseAndValidateParticipants(
+  content: string | ArrayBuffer,
+  fileType: 'csv' | 'xlsx' = 'csv'
+): ImportValidationResult<ParsedParticipantRow> {
+  let rawRows: Record<string, unknown>[] = [];
+
+  if (fileType === 'csv') {
+    const csvString = typeof content === 'string' ? content : new TextDecoder().decode(content);
+    const parsed = Papa.parse<Record<string, unknown>>(csvString, {
+      header: true,
+      skipEmptyLines: true,
+      dynamicTyping: true,
+    });
+    rawRows = parsed.data;
+  } else {
+    const workbook = XLSX.read(content, { type: 'array' });
+    const firstSheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[firstSheetName];
+    rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet);
+  }
+
+  const validRows: ParsedParticipantRow[] = [];
+  const invalidRows: { rowNumber: number; data: unknown; errors: string[] }[] = [];
+  const seenCodes = new Set<string>();
+
+  rawRows.forEach((row, idx) => {
+    const rowNum = idx + 2;
+    const normalized = normalizeRowKeys(row, idx);
+
+    const parseResult = ParticipantImportRowSchema.safeParse(normalized);
+
+    if (!parseResult.success) {
+      invalidRows.push({
+        rowNumber: rowNum,
+        data: row,
+        errors: parseResult.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`),
+      });
+      return;
+    }
+
+    const val = parseResult.data as ParsedParticipantRow;
+
+    if (val.participantCode) {
+      if (seenCodes.has(val.participantCode)) {
+        invalidRows.push({
+          rowNumber: rowNum,
+          data: row,
+          errors: [`Duplicate participant code '${val.participantCode}'`],
+        });
+        return;
+      }
+      seenCodes.add(val.participantCode);
+    }
+
+    validRows.push(val);
+  });
+
+  return {
+    validRows,
+    invalidRows,
+    duplicates: [],
+    totalProcessed: rawRows.length,
+  };
+}
+
+/**
  * Parses Google Form / Custom Sheet Responses into structured church registrations
  */
 export function parseGoogleFormRegistrations(
@@ -321,6 +399,10 @@ export function parseGoogleFormRegistrations(
     const churchName = String(normalized['churchName'] || normalized['teamName'] || `Church ${idx + 1}`).trim();
     if (!churchName) return;
 
+    const d1 = normalized['duetParticipant1'] ? String(normalized['duetParticipant1']).trim() : undefined;
+    const d2 = normalized['duetParticipant2'] ? String(normalized['duetParticipant2']).trim() : undefined;
+    const duetCombined = [d1, d2].filter(Boolean).join(' & ');
+
     results.push({
       rowNumber: idx + 2,
       performanceOrder: Number(normalized['performanceOrder']) || idx + 1,
@@ -330,8 +412,9 @@ export function parseGoogleFormRegistrations(
       pastorName: normalized['pastorName'] ? String(normalized['pastorName']) : undefined,
       choirLeaderName: normalized['choirLeaderName'] ? String(normalized['choirLeaderName']) : undefined,
       soloParticipantName: normalized['soloParticipantName'] ? String(normalized['soloParticipantName']) : undefined,
-      duetParticipant1: normalized['duetParticipant1'] ? String(normalized['duetParticipant1']) : undefined,
-      duetParticipant2: normalized['duetParticipant2'] ? String(normalized['duetParticipant2']) : undefined,
+      duetParticipant1: d1,
+      duetParticipant2: d2,
+      duetCombinedName: duetCombined || undefined,
       // Specific Instruments
       keyboardist: normalized['keyboardist'] as string || null,
       harmonium: normalized['harmonium'] as string || null,
@@ -369,7 +452,7 @@ export function convertGoogleFormsToCompetitionActs(
     const churchCode = `C${(churchIdx + 1).toString().padStart(2, '0')}`;
     const baseOrder = reg.performanceOrder || orderCounter++;
 
-    // 1. Solo Act (if solo performer provided)
+    // 1. Solo Act
     if (reg.soloParticipantName) {
       acts.push({
         participantCode: `${churchCode}-SOLO`,
@@ -388,14 +471,19 @@ export function convertGoogleFormsToCompetitionActs(
       });
     }
 
-    // 2. Duet Act (if duet performers provided)
-    if (reg.duetParticipant1 || reg.duetParticipant2) {
-      const duetName = [reg.duetParticipant1, reg.duetParticipant2].filter(Boolean).join(' & ');
+    // 2. Duet Act with Both Names Captured
+    if (reg.duetParticipant1 || reg.duetParticipant2 || reg.duetCombinedName) {
+      const p1 = reg.duetParticipant1 || '';
+      const p2 = reg.duetParticipant2 || '';
+      const duetCombined = reg.duetCombinedName || [p1, p2].filter(Boolean).join(' & ');
+
       acts.push({
         participantCode: `${churchCode}-DUET`,
-        participantName: duetName,
-        firstName: reg.duetParticipant1 || duetName,
-        lastName: reg.duetParticipant2 || '',
+        participantName: duetCombined,
+        firstName: p1 || duetCombined,
+        lastName: p2 || '',
+        duetParticipant1: p1,
+        duetParticipant2: p2,
         teamName: reg.churchName,
         churchName: reg.churchName,
         performanceType: 'duet',
@@ -408,16 +496,14 @@ export function convertGoogleFormsToCompetitionActs(
       });
     }
 
-    // 3. Group / Choir Act
-    const choirName = reg.choirLeaderName 
+    // 3. Group Choir Act
+    const groupName = reg.choirLeaderName 
       ? `${reg.churchName} Choir (Leader: ${reg.choirLeaderName})` 
       : `${reg.churchName} Choir`;
 
     acts.push({
-      participantCode: `${churchCode}-GRP`,
-      participantName: choirName,
-      firstName: reg.choirLeaderName || `${reg.churchName} Choir`,
-      lastName: '',
+      participantCode: `${churchCode}-GROUP`,
+      participantName: groupName,
       teamName: reg.churchName,
       churchName: reg.churchName,
       performanceType: 'group',
@@ -431,128 +517,4 @@ export function convertGoogleFormsToCompetitionActs(
   });
 
   return acts;
-}
-
-/**
- * Parses raw CSV string or ArrayBuffer Excel file into validated participant rows
- */
-export function parseAndValidateParticipants(
-  fileContent: string | ArrayBuffer,
-  fileType: 'csv' | 'xlsx'
-): ImportValidationResult<ParsedParticipantRow> {
-  let rawRows: Record<string, unknown>[] = [];
-
-  if (fileType === 'csv') {
-    const csvString = typeof fileContent === 'string' ? fileContent : new TextDecoder().decode(fileContent);
-    const parsed = Papa.parse<Record<string, unknown>>(csvString, {
-      header: true,
-      skipEmptyLines: true,
-      dynamicTyping: true,
-    });
-    rawRows = parsed.data;
-  } else {
-    const workbook = XLSX.read(fileContent, { type: 'array' });
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
-    rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet);
-  }
-
-  const validRows: ParsedParticipantRow[] = [];
-  const invalidRows: { rowNumber: number; data: Record<string, unknown>; errors: string[] }[] = [];
-  const duplicates: { rowNumber: number; code: string }[] = [];
-  const seenCodes = new Set<string>();
-
-  rawRows.forEach((rawRow, index) => {
-    const rowNumber = index + 2;
-    const normalized = normalizeRowKeys(rawRow, index);
-
-    const validation = ParticipantImportRowSchema.safeParse(normalized);
-    if (!validation.success) {
-      invalidRows.push({
-        rowNumber,
-        data: rawRow,
-        errors: validation.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`),
-      });
-      return;
-    }
-
-    const validData = validation.data as ParsedParticipantRow;
-
-    if (seenCodes.has(validData.participantCode.toUpperCase())) {
-      duplicates.push({ rowNumber, code: validData.participantCode });
-    } else {
-      seenCodes.add(validData.participantCode.toUpperCase());
-    }
-
-    validRows.push(validData);
-  });
-
-  return {
-    validRows,
-    invalidRows,
-    duplicates,
-    totalRows: rawRows.length,
-  };
-}
-
-/**
- * Parses raw CSV/Excel file into validated team rows with members
- */
-export function parseAndValidateTeams(
-  fileContent: string | ArrayBuffer,
-  fileType: 'csv' | 'xlsx'
-): ImportValidationResult<ParsedTeamRow> {
-  let rawRows: Record<string, unknown>[] = [];
-
-  if (fileType === 'csv') {
-    const csvString = typeof fileContent === 'string' ? fileContent : new TextDecoder().decode(fileContent);
-    const parsed = Papa.parse<Record<string, unknown>>(csvString, {
-      header: true,
-      skipEmptyLines: true,
-      dynamicTyping: true,
-    });
-    rawRows = parsed.data;
-  } else {
-    const workbook = XLSX.read(fileContent, { type: 'array' });
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
-    rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet);
-  }
-
-  const validRows: ParsedTeamRow[] = [];
-  const invalidRows: { rowNumber: number; data: Record<string, unknown>; errors: string[] }[] = [];
-  const duplicates: { rowNumber: number; code: string }[] = [];
-  const seenCodes = new Set<string>();
-
-  rawRows.forEach((rawRow, index) => {
-    const rowNumber = index + 2;
-    const normalized = normalizeRowKeys(rawRow, index);
-
-    const validation = TeamImportRowSchema.safeParse(normalized);
-    if (!validation.success) {
-      invalidRows.push({
-        rowNumber,
-        data: rawRow,
-        errors: validation.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`),
-      });
-      return;
-    }
-
-    const validData = validation.data as ParsedTeamRow;
-
-    if (seenCodes.has(validData.teamCode.toUpperCase())) {
-      duplicates.push({ rowNumber, code: validData.teamCode });
-    } else {
-      seenCodes.add(validData.teamCode.toUpperCase());
-    }
-
-    validRows.push(validData);
-  });
-
-  return {
-    validRows,
-    invalidRows,
-    duplicates,
-    totalRows: rawRows.length,
-  };
 }

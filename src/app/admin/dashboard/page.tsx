@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase/client';
 import { Competition, UserProfile } from '@/types';
 import { deleteCompetition, createCompetition } from '@/actions/competitions';
 import { getEventCriteria, saveEventCriteria, CustomCriterion, TimeSlotConfig } from '@/actions/criteria';
-import { calculateEventPrizes, publishEventResults, EventPrizeStandings } from '@/actions/prizes';
+import { calculateEventPrizes, verifyEventPasswordAndPublish, EventPrizeStandings } from '@/actions/prizes';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import {
   Settings,
@@ -30,7 +30,9 @@ import {
   Edit3,
   Clock,
   CheckCircle2,
-  Medal
+  Medal,
+  KeyRound,
+  AlertTriangle
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -40,7 +42,7 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  // Create Event Modal State
+  // Create Event Modal State with Security Password
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [createForm, setCreateForm] = useState({
@@ -50,6 +52,7 @@ export default function AdminDashboardPage() {
     venue: '',
     startDate: '',
     endDate: '',
+    eventPassword: '',
     soloSlateMinutes: 4,
     duetSlateMinutes: 5,
     groupSlateMinutes: 8,
@@ -65,9 +68,11 @@ export default function AdminDashboardPage() {
   });
   const [isSavingCriteria, setIsSavingCriteria] = useState(false);
 
-  // Individual Prizes Standings Modal State
+  // Individual Prizes Standings & Publishing Modal State
   const [prizeModalEvent, setPrizeModalEvent] = useState<Competition | null>(null);
   const [prizeStandings, setPrizeStandings] = useState<EventPrizeStandings | null>(null);
+  const [publishPassword, setPublishPassword] = useState('');
+  const [publishError, setPublishError] = useState<string | null>(null);
   const [isPublishingPrizes, setIsPublishingPrizes] = useState(false);
 
   // Confirmation Dialog State
@@ -171,6 +176,7 @@ export default function AdminDashboardPage() {
         startDate: createForm.startDate || undefined,
         endDate: createForm.endDate || undefined,
         environment: 'live',
+        eventPassword: createForm.eventPassword.trim() || undefined,
       });
 
       if (newComp?.id) {
@@ -186,7 +192,7 @@ export default function AdminDashboardPage() {
         });
       }
 
-      setActionMessage(`Successfully created event "${createForm.name}"!`);
+      setActionMessage(`Successfully created event "${createForm.name}" with security password protection!`);
       setIsCreateOpen(false);
       setCreateForm({
         name: '',
@@ -195,6 +201,7 @@ export default function AdminDashboardPage() {
         venue: '',
         startDate: '',
         endDate: '',
+        eventPassword: '',
         soloSlateMinutes: 4,
         duetSlateMinutes: 5,
         groupSlateMinutes: 8,
@@ -258,33 +265,26 @@ export default function AdminDashboardPage() {
   // Open Prizes Standings Modal
   const openPrizesModal = async (comp: Competition) => {
     setPrizeModalEvent(comp);
+    setPublishPassword('');
+    setPublishError(null);
     const standings = await calculateEventPrizes(comp.id);
     setPrizeStandings(standings);
   };
 
   const handlePublishResults = async () => {
     if (!prizeModalEvent) return;
-    setConfirmDialog({
-      isOpen: true,
-      title: 'Publish Official Results Confirmation',
-      message: `Are you ready to lock and publish official prize standings for "${prizeModalEvent.name}" to the public live scoreboard?`,
-      confirmLabel: 'Yes, Publish Official Results',
-      variant: 'primary',
-      action: async () => {
-        setIsPublishingPrizes(true);
-        try {
-          await publishEventResults(prizeModalEvent.id);
-          setActionMessage(`Official Prize Results successfully published for "${prizeModalEvent.name}"!`);
-          setPrizeModalEvent(null);
-          setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
-          await loadStats();
-        } catch (e: any) {
-          alert(e.message || 'Failed to publish results');
-        } finally {
-          setIsPublishingPrizes(false);
-        }
-      },
-    });
+    setPublishError(null);
+    setIsPublishingPrizes(true);
+    try {
+      await verifyEventPasswordAndPublish(prizeModalEvent.id, publishPassword);
+      setActionMessage(`Official Prize Results successfully published for "${prizeModalEvent.name}"!`);
+      setPrizeModalEvent(null);
+      await loadStats();
+    } catch (e: any) {
+      setPublishError(e.message || 'Failed to authorize publishing. Check event password.');
+    } finally {
+      setIsPublishingPrizes(false);
+    }
   };
 
   const totalCriteriaMax = criteriaList.reduce((sum, c) => sum + (Number(c.maxMarks) || 0), 0);
@@ -301,7 +301,7 @@ export default function AdminDashboardPage() {
               <Settings className="w-6 h-6 text-amber-400" />
               <span>Admin Management Hub</span>
             </h1>
-            <p className="text-sm text-slate-400 mt-1">Live Event Setup, Time Slots, Custom Criteria & Prize Standings</p>
+            <p className="text-sm text-slate-400 mt-1">Live Event Setup, Password Protection, Time Slots & Prize Adjudication</p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -410,6 +410,11 @@ export default function AdminDashboardPage() {
                           <Calendar className="w-3 h-3" /> {comp.startDate}
                         </span>
                       )}
+                      {comp.status === 'completed' && (
+                        <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded border border-emerald-500/30">
+                          PUBLISHED
+                        </span>
+                      )}
                     </div>
                     <h3 className="font-bold text-lg text-white">{comp.name}</h3>
                     {comp.venue && (
@@ -480,7 +485,7 @@ export default function AdminDashboardPage() {
         </div>
       </main>
 
-      {/* Individual Prizes & Category Standings Modal */}
+      {/* Individual Prizes & Category Standings Modal with Password-Protected Publishing */}
       {prizeModalEvent && prizeStandings && (
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 max-w-2xl w-full space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -496,6 +501,26 @@ export default function AdminDashboardPage() {
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* TIE ALERT WARNING BOX */}
+            {prizeStandings.ties && prizeStandings.ties.length > 0 && (
+              <div className="p-4 rounded-2xl bg-amber-950/60 border border-amber-500/50 space-y-2">
+                <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase">
+                  <AlertTriangle className="w-4 h-4" />
+                  ⚠️ Tie Score Review Required Before Final Publishing
+                </div>
+                {prizeStandings.ties.map((t, idx) => (
+                  <div key={idx} className="text-xs text-amber-200 pl-6 space-y-1">
+                    <div><strong>{t.category} (Rank #{t.rank})</strong> — Equal Score: {t.score.toFixed(2)} pts:</div>
+                    <ul className="list-disc list-inside text-slate-300 text-[11px]">
+                      {t.tiedContestants.map((c) => (
+                        <li key={c.id}>{c.name} ({c.churchName})</li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Overall Church Championship Ranking */}
             <div className="space-y-3 bg-slate-950/80 border border-slate-800 p-4 rounded-2xl">
@@ -525,31 +550,15 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
-            {/* Individual Solo Category */}
+            {/* Duet Category (Both Singers Displayed) */}
             <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-300 uppercase">🥇 Individual Solo Prizes</span>
-              <div className="space-y-1.5">
-                {prizeStandings.soloStandings.slice(0, 3).map((s) => (
-                  <div key={s.participantId} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-bold text-white">{s.name} ({s.churchName})</span>
-                      <span className="text-[10px] text-amber-400 block">{s.prizeTitle}</span>
-                    </div>
-                    <span className="font-mono font-bold text-cyan-400">{s.totalScore.toFixed(1)} pts</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Individual Duet Category */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-300 uppercase">🥈 Individual Duet Prizes</span>
+              <span className="text-xs font-bold text-purple-300 uppercase">👥 Duet Category (Both Singers Displayed)</span>
               <div className="space-y-1.5">
                 {prizeStandings.duetStandings.slice(0, 3).map((d) => (
                   <div key={d.participantId} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs">
                     <div>
                       <span className="font-bold text-white">{d.name} ({d.churchName})</span>
-                      <span className="text-[10px] text-amber-400 block">{d.prizeTitle}</span>
+                      <span className="text-[10px] text-purple-400 block">{d.prizeTitle}</span>
                     </div>
                     <span className="font-mono font-bold text-cyan-400">{d.totalScore.toFixed(1)} pts</span>
                   </div>
@@ -557,20 +566,22 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
-            {/* Group Choir Category */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-300 uppercase">🥉 Group Choir Prizes</span>
-              <div className="space-y-1.5">
-                {prizeStandings.groupStandings.slice(0, 3).map((g) => (
-                  <div key={g.participantId} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-bold text-white">{g.name} ({g.churchName})</span>
-                      <span className="text-[10px] text-amber-400 block">{g.prizeTitle}</span>
-                    </div>
-                    <span className="font-mono font-bold text-cyan-400">{g.totalScore.toFixed(1)} pts</span>
-                  </div>
-                ))}
-              </div>
+            {/* Security Password Authorization Input */}
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+              <label className="text-xs font-bold text-slate-300 uppercase flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                Enter Event Security Password to Authorize Publishing
+              </label>
+              <input
+                type="password"
+                value={publishPassword}
+                onChange={(e) => setPublishPassword(e.target.value)}
+                placeholder="Enter password set during event creation"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 focus:border-amber-500 rounded-xl text-xs text-white focus:outline-none font-mono"
+              />
+              {publishError && (
+                <p className="text-[11px] text-red-400 font-bold">{publishError}</p>
+              )}
             </div>
 
             {/* Actions */}
@@ -589,7 +600,7 @@ export default function AdminDashboardPage() {
                 className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs shadow-lg disabled:opacity-40 flex items-center justify-center gap-1 cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>{isPublishingPrizes ? 'Publishing...' : 'Confirm & Publish Official Results'}</span>
+                <span>{isPublishingPrizes ? 'Authorizing...' : 'Authorize & Publish Official Results'}</span>
               </button>
             </div>
           </div>
@@ -751,7 +762,7 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* Create Event Modal */}
+      {/* Create Event Modal with Password Field */}
       {isCreateOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
@@ -787,6 +798,20 @@ export default function AdminDashboardPage() {
                   onChange={(e) => setCreateForm({ ...createForm, code: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono uppercase focus:outline-none focus:border-cyan-500"
                   placeholder="e.g. SCC-2026"
+                />
+              </div>
+
+              {/* Event Security Password */}
+              <div>
+                <label className="block text-amber-400 mb-1 font-bold flex items-center gap-1">
+                  <KeyRound className="w-3 h-3" /> Event Security Passkey * (Required to Publish Results)
+                </label>
+                <input
+                  type="password"
+                  value={createForm.eventPassword}
+                  onChange={(e) => setCreateForm({ ...createForm, eventPassword: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl text-white font-mono focus:outline-none"
+                  placeholder="Set secret password (e.g. ChurchAdmin2026!)"
                 />
               </div>
 

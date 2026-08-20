@@ -1,6 +1,6 @@
 'use server';
 
-// src/actions/prizes.ts - Individual Category Prizes & Overall Church Championship Adjudication
+// src/actions/prizes.ts - Individual Category Prizes, Tie-Breaker Engine & Password-Protected Publishing
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { requireRole } from '@/lib/auth/guards';
 import { revalidatePath } from 'next/cache';
@@ -9,6 +9,8 @@ export interface CategoryPrizeRank {
   rank: number;
   participantId: string;
   name: string;
+  duetParticipant1?: string;
+  duetParticipant2?: string;
   churchName: string;
   performanceType: string;
   totalScore: number;
@@ -32,8 +34,16 @@ export interface ChurchOverallRank {
   prizeTitle?: string;
 }
 
+export interface TieAlert {
+  category: string;
+  rank: number;
+  score: number;
+  tiedContestants: { id: string; name: string; churchName: string }[];
+}
+
 export interface EventPrizeStandings {
   eventId: string;
+  eventName: string;
   soloStandings: CategoryPrizeRank[];
   duetStandings: CategoryPrizeRank[];
   groupStandings: CategoryPrizeRank[];
@@ -41,6 +51,7 @@ export interface EventPrizeStandings {
   rhythmistStandings: CategoryPrizeRank[];
   guitaristStandings: CategoryPrizeRank[];
   churchOverallStandings: ChurchOverallRank[];
+  ties: TieAlert[];
   isPublished: boolean;
 }
 
@@ -59,7 +70,7 @@ export async function calculateEventPrizes(eventId: string): Promise<EventPrizeS
       .eq('event_id', eventId),
     supabase
       .from('competitions')
-      .select('status')
+      .select('name, status')
       .eq('id', eventId)
       .single(),
   ]);
@@ -67,6 +78,7 @@ export async function calculateEventPrizes(eventId: string): Promise<EventPrizeS
   if (!participants || participants.length === 0) {
     return {
       eventId,
+      eventName: comp?.name || 'Championship Event',
       soloStandings: [],
       duetStandings: [],
       groupStandings: [],
@@ -74,6 +86,7 @@ export async function calculateEventPrizes(eventId: string): Promise<EventPrizeS
       rhythmistStandings: [],
       guitaristStandings: [],
       churchOverallStandings: [],
+      ties: [],
       isPublished: comp?.status === 'completed',
     };
   }
@@ -100,18 +113,27 @@ export async function calculateEventPrizes(eventId: string): Promise<EventPrizeS
   const rhythmList: CategoryPrizeRank[] = [];
   const guitarList: CategoryPrizeRank[] = [];
 
-  // Group by Church for Overall Championship
   const churchMap = new Map<string, { solo: number; duet: number; group: number; inst: number }>();
 
   participants.forEach((p) => {
     const sc = participantScoreMap.get(p.id) || { total: 0, count: 0, keyScore: 0, rhythmScore: 0, guitarScore: 0 };
-    const pName = p.participant_name || p.team_name || `${p.first_name || ''} ${p.last_name || ''}`.trim();
+    
+    // For Duet, format both names clearly
+    let pName = p.participant_name || p.team_name || `${p.first_name || ''} ${p.last_name || ''}`.trim();
+    if (p.performance_type === 'duet') {
+      if (p.first_name && p.last_name && p.first_name !== p.last_name) {
+        pName = `${p.first_name} & ${p.last_name}`;
+      }
+    }
+
     const church = p.church_name || 'Independent Church';
 
     const rankItem: CategoryPrizeRank = {
       rank: 0,
       participantId: p.id,
       name: pName,
+      duetParticipant1: p.first_name || undefined,
+      duetParticipant2: p.last_name || undefined,
       churchName: church,
       performanceType: p.performance_type,
       totalScore: sc.total,
@@ -123,7 +145,6 @@ export async function calculateEventPrizes(eventId: string): Promise<EventPrizeS
       },
     };
 
-    // Update Church scores
     const cData = churchMap.get(church) || { solo: 0, duet: 0, group: 0, inst: 0 };
     if (p.performance_type === 'solo') {
       soloList.push(rankItem);
@@ -149,12 +170,36 @@ export async function calculateEventPrizes(eventId: string): Promise<EventPrizeS
     churchMap.set(church, cData);
   });
 
-  // Helper rank assigner
+  const ties: TieAlert[] = [];
+
+  // Helper rank assigner + tie finder
   const ranker = (list: CategoryPrizeRank[], categoryLabel: string) => {
     list.sort((a, b) => b.totalScore - a.totalScore);
+    
+    // Check top 3 ties
+    const scoreMap = new Map<number, CategoryPrizeRank[]>();
+    list.slice(0, 5).forEach((item) => {
+      if (item.totalScore > 0) {
+        const arr = scoreMap.get(item.totalScore) || [];
+        arr.push(item);
+        scoreMap.set(item.totalScore, arr);
+      }
+    });
+
+    scoreMap.forEach((tiedGroup, score) => {
+      if (tiedGroup.length > 1) {
+        ties.push({
+          category: categoryLabel,
+          rank: list.indexOf(tiedGroup[0]) + 1,
+          score,
+          tiedContestants: tiedGroup.map((g) => ({ id: g.participantId, name: g.name, churchName: g.churchName })),
+        });
+      }
+    });
+
     list.forEach((item, idx) => {
       item.rank = idx + 1;
-      if (idx === 0) item.prizeTitle = `🥇 1st Place Champion - ${categoryLabel}`;
+      if (idx === 0) item.prizeTitle = `🥇 1st Place Winner - ${categoryLabel}`;
       else if (idx === 1) item.prizeTitle = `🥈 2nd Place Runner-Up - ${categoryLabel}`;
       else if (idx === 2) item.prizeTitle = `🥉 3rd Place - ${categoryLabel}`;
       else item.prizeTitle = `Participant`;
@@ -190,6 +235,7 @@ export async function calculateEventPrizes(eventId: string): Promise<EventPrizeS
 
   return {
     eventId,
+    eventName: comp?.name || 'Championship Event',
     soloStandings: rankedSolo,
     duetStandings: rankedDuet,
     groupStandings: rankedGroup,
@@ -197,17 +243,35 @@ export async function calculateEventPrizes(eventId: string): Promise<EventPrizeS
     rhythmistStandings: rankedRhythm,
     guitaristStandings: rankedGuitar,
     churchOverallStandings: churchOverall,
+    ties,
     isPublished: comp?.status === 'completed',
   };
 }
 
 /**
- * Admin Action to Publish Official Results
+ * 2. Password-Protected Final Official Results Publication
  */
-export async function publishEventResults(eventId: string) {
+export async function verifyEventPasswordAndPublish(eventId: string, enteredPasscode: string) {
   const admin = await requireRole('admin');
   const supabase = await createServerSupabaseClient();
 
+  const { data: comp } = await supabase
+    .from('competitions')
+    .select('id, name, settings:competition_settings(*)')
+    .eq('id', eventId)
+    .single();
+
+  if (!comp) throw new Error('Event not found.');
+
+  const storedPasscode = (comp.settings as any)?.publish_passcode;
+
+  if (storedPasscode && storedPasscode.trim()) {
+    if (enteredPasscode.trim() !== storedPasscode.trim()) {
+      throw new Error('Invalid Event Security Password. The password entered does not match the event creation passkey.');
+    }
+  }
+
+  // Update competition status to completed (published)
   const { error } = await supabase
     .from('competitions')
     .update({ status: 'completed', updated_at: new Date().toISOString() })
@@ -215,10 +279,18 @@ export async function publishEventResults(eventId: string) {
 
   if (error) throw new Error(`Failed to publish results: ${error.message}`);
 
+  // Lock all event states
+  await supabase.from('event_state').update({
+    stage_mode: 'completed',
+    is_judge_input_unlocked: false,
+    timer_status: 'stopped',
+    updated_at: new Date().toISOString(),
+  }).eq('event_id', eventId);
+
   await supabase.from('audit_logs').insert({
     competition_id: eventId,
     actor_id: admin.id,
-    action: 'PUBLISH_OFFICIAL_RESULTS',
+    action: 'PUBLISH_OFFICIAL_RESULTS_AUTHORIZED',
     entity: 'competitions',
     entity_id: eventId,
   });
@@ -228,4 +300,49 @@ export async function publishEventResults(eventId: string) {
   revalidatePath('/admin/dashboard');
 
   return { success: true };
+}
+
+/**
+ * 3. Generate CSV / Sheets Export for Official Results
+ */
+export async function exportEventResultsCSV(eventId: string): Promise<string> {
+  const standings = await calculateEventPrizes(eventId);
+
+  const rows: string[] = [];
+  rows.push(`"OFFICIAL GRAND CHAMPIONSHIP RESULTS - ${standings.eventName}"`);
+  rows.push(`"Generated on: ${new Date().toLocaleString()}"`);
+  rows.push('');
+
+  // 1. Overall Church Championship
+  rows.push('"OVERALL CHURCH CHAMPIONSHIP RANKINGS"');
+  rows.push('"Rank","Church Name","Solo Score","Duet Score","Group Score","Instruments Score","Grand Total","Prize Title"');
+  standings.churchOverallStandings.forEach((c) => {
+    rows.push(`"${c.rank}","${c.churchName}","${c.soloScore.toFixed(2)}","${c.duetScore.toFixed(2)}","${c.groupScore.toFixed(2)}","${c.instrumentsScore.toFixed(2)}","${c.grandTotal.toFixed(2)}","${c.prizeTitle || ''}"`);
+  });
+
+  rows.push('');
+  // 2. Solo Category
+  rows.push('"SOLO CATEGORY AWARDS"');
+  rows.push('"Rank","Participant Name","Church Name","Total Score","Prize"');
+  standings.soloStandings.forEach((s) => {
+    rows.push(`"${s.rank}","${s.name}","${s.churchName}","${s.totalScore.toFixed(2)}","${s.prizeTitle || ''}"`);
+  });
+
+  rows.push('');
+  // 3. Duet Category
+  rows.push('"DUET CATEGORY AWARDS (BOTH PARTICIPANTS)"');
+  rows.push('"Rank","Duet Singers","Church Name","Total Score","Prize"');
+  standings.duetStandings.forEach((d) => {
+    rows.push(`"${d.rank}","${d.name}","${d.churchName}","${d.totalScore.toFixed(2)}","${d.prizeTitle || ''}"`);
+  });
+
+  rows.push('');
+  // 4. Group Category
+  rows.push('"GROUP / CHOIR CATEGORY AWARDS"');
+  rows.push('"Rank","Group Name","Church Name","Total Score","Prize"');
+  standings.groupStandings.forEach((g) => {
+    rows.push(`"${g.rank}","${g.name}","${g.churchName}","${g.totalScore.toFixed(2)}","${g.prizeTitle || ''}"`);
+  });
+
+  return rows.join('\n');
 }

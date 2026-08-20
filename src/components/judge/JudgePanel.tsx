@@ -292,7 +292,9 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
             </div>
 
             <h2 className="text-xl sm:text-2xl font-black text-white truncate pt-1">
-              {activePerformer.participant_name || activePerformer.team_name || `${activePerformer.first_name || ''} ${activePerformer.last_name || ''}`.trim()}
+              {activePerformer.performance_type === 'duet' && activePerformer.first_name && activePerformer.last_name && activePerformer.first_name !== activePerformer.last_name
+                ? `${activePerformer.first_name} & ${activePerformer.last_name}`
+                : (activePerformer.participant_name || activePerformer.team_name || `${activePerformer.first_name || ''} ${activePerformer.last_name || ''}`.trim())}
             </h2>
             <p className="text-xs text-slate-300 truncate font-semibold">🏛️ {activePerformer.church_name || activePerformer.institution || 'Independent'}</p>
 

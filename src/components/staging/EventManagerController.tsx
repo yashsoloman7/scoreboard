@@ -1,6 +1,6 @@
 'use client';
 
-// src/components/staging/EventManagerController.tsx - Stage Manager Console with Wall-Clock Timer & Queue Color States
+// src/components/staging/EventManagerController.tsx - Stage Manager Console with Wall-Clock Timer & Multi-Singer Duet Support
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { updateParticipantDetails, deleteParticipant } from '@/actions/participants';
@@ -35,7 +35,9 @@ interface Participant {
   performance_type: string;
   performance_order: number;
   best_keyboardist?: string | null;
+  bestRhythmist?: string | null;
   best_rhythmist?: string | null;
+  bestGuitarist?: string | null;
   best_guitarist?: string | null;
 }
 
@@ -70,6 +72,8 @@ export function EventManagerController({ eventId }: { eventId: string }) {
   const [isAddingPerformer, setIsAddingPerformer] = useState(false);
   const [editForm, setEditForm] = useState<{
     participantName: string;
+    duetSinger1: string;
+    duetSinger2: string;
     churchName: string;
     performanceType: 'solo' | 'duet' | 'group';
     bestKeyboardist: string;
@@ -78,6 +82,8 @@ export function EventManagerController({ eventId }: { eventId: string }) {
     performanceOrder: number;
   }>({
     participantName: '',
+    duetSinger1: '',
+    duetSinger2: '',
     churchName: '',
     performanceType: 'solo',
     bestKeyboardist: '',
@@ -111,7 +117,6 @@ export function EventManagerController({ eventId }: { eventId: string }) {
       supabase.from('scores').select('participant_id').eq('event_id', eventId),
     ]);
 
-    // Load category time slots configured by creator
     try {
       const config = await getEventCriteria(eventId);
       if (config?.timeSlots) {
@@ -209,7 +214,6 @@ export function EventManagerController({ eventId }: { eventId: string }) {
     setIsUpdating(true);
     setSubmittedJudgeCount(0);
 
-    // Pick duration configured for this act format
     let targetDuration = timeSlots.soloDurationSeconds;
     if (p.performance_type === 'duet') targetDuration = timeSlots.duetDurationSeconds;
     else if (p.performance_type === 'group') targetDuration = timeSlots.groupDurationSeconds;
@@ -232,11 +236,22 @@ export function EventManagerController({ eventId }: { eventId: string }) {
     setIsUpdating(false);
   };
 
-  // 5. Edit Performer Handler
+  // 5. Edit Performer Handler with Duet 1 & 2 Support
   const openEditModal = (p: Participant) => {
     setEditingParticipant(p);
+    
+    let d1 = p.first_name || '';
+    let d2 = p.last_name || '';
+    if (p.participant_name && p.participant_name.includes('&')) {
+      const parts = p.participant_name.split('&').map((s) => s.trim());
+      d1 = parts[0] || d1;
+      d2 = parts[1] || d2;
+    }
+
     setEditForm({
       participantName: p.participant_name || `${p.first_name || ''} ${p.last_name || ''}`.trim(),
+      duetSinger1: d1,
+      duetSinger2: d2,
       churchName: p.church_name || p.team_name || '',
       performanceType: (p.performance_type as any) || 'solo',
       bestKeyboardist: p.best_keyboardist || '',
@@ -250,10 +265,14 @@ export function EventManagerController({ eventId }: { eventId: string }) {
     if (!editingParticipant) return;
     setIsUpdating(true);
     try {
+      const fullName = editForm.performanceType === 'duet'
+        ? [editForm.duetSinger1, editForm.duetSinger2].filter(Boolean).join(' & ')
+        : editForm.participantName;
+
       await updateParticipantDetails(editingParticipant.id, {
-        participantName: editForm.participantName,
-        firstName: editForm.participantName.split(' ')[0] || editForm.participantName,
-        lastName: editForm.participantName.split(' ').slice(1).join(' ') || '',
+        participantName: fullName,
+        firstName: editForm.performanceType === 'duet' ? editForm.duetSinger1 : fullName.split(' ')[0] || fullName,
+        lastName: editForm.performanceType === 'duet' ? editForm.duetSinger2 : fullName.split(' ').slice(1).join(' ') || '',
         churchName: editForm.churchName,
         teamName: editForm.churchName,
         performanceType: editForm.performanceType,
@@ -271,18 +290,22 @@ export function EventManagerController({ eventId }: { eventId: string }) {
     }
   };
 
-  // 6. Manual Add Performer
+  // 6. Manual Add Performer with Duet 1 & 2 Support
   const handleCreatePerformer = async () => {
     setIsUpdating(true);
     try {
       const order = participants.length + 1;
       const code = `P-${order.toString().padStart(3, '0')}`;
+      const fullName = editForm.performanceType === 'duet'
+        ? [editForm.duetSinger1, editForm.duetSinger2].filter(Boolean).join(' & ')
+        : editForm.participantName;
+
       const { error } = await supabase.from('participants').insert({
         competition_id: eventId,
         participant_code: code,
-        participant_name: editForm.participantName,
-        first_name: editForm.participantName.split(' ')[0] || editForm.participantName,
-        last_name: editForm.participantName.split(' ').slice(1).join(' ') || '',
+        participant_name: fullName,
+        first_name: editForm.performanceType === 'duet' ? editForm.duetSinger1 : fullName.split(' ')[0] || fullName,
+        last_name: editForm.performanceType === 'duet' ? editForm.duetSinger2 : fullName.split(' ').slice(1).join(' ') || '',
         church_name: editForm.churchName,
         team_name: editForm.churchName,
         performance_type: editForm.performanceType,
@@ -480,6 +503,8 @@ export function EventManagerController({ eventId }: { eventId: string }) {
             onClick={() => {
               setEditForm({
                 participantName: '',
+                duetSinger1: '',
+                duetSinger2: '',
                 churchName: '',
                 performanceType: 'solo',
                 bestKeyboardist: '',
@@ -570,7 +595,7 @@ export function EventManagerController({ eventId }: { eventId: string }) {
         )}
       </div>
 
-      {/* Edit / Add Modal */}
+      {/* Edit / Add Modal with Duet 1 & Duet 2 Support */}
       {(editingParticipant || isAddingPerformer) && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
@@ -591,15 +616,54 @@ export function EventManagerController({ eventId }: { eventId: string }) {
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-400 mb-1 font-bold">Performer / Act Name</label>
-                <input
-                  type="text"
-                  value={editForm.participantName}
-                  onChange={(e) => setEditForm({ ...editForm, participantName: e.target.value })}
+                <label className="block text-slate-400 mb-1 font-bold">Performance Type</label>
+                <select
+                  value={editForm.performanceType}
+                  onChange={(e) => setEditForm({ ...editForm, performanceType: e.target.value as any })}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-cyan-500"
-                  placeholder="e.g. David Miller or Cathedral Choir"
-                />
+                >
+                  <option value="solo">Solo</option>
+                  <option value="duet">Duet (2 Singers)</option>
+                  <option value="group">Group / Choir</option>
+                </select>
               </div>
+
+              {/* Dynamic Performer Fields depending on Solo/Group vs Duet */}
+              {editForm.performanceType === 'duet' ? (
+                <div className="grid grid-cols-2 gap-2 bg-slate-950 p-3 rounded-2xl border border-slate-800">
+                  <div>
+                    <label className="block text-purple-400 mb-1 font-bold">Duet Singer #1 *</label>
+                    <input
+                      type="text"
+                      value={editForm.duetSinger1}
+                      onChange={(e) => setEditForm({ ...editForm, duetSinger1: e.target.value })}
+                      className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-purple-500"
+                      placeholder="e.g. John Doe"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-purple-400 mb-1 font-bold">Duet Singer #2 *</label>
+                    <input
+                      type="text"
+                      value={editForm.duetSinger2}
+                      onChange={(e) => setEditForm({ ...editForm, duetSinger2: e.target.value })}
+                      className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-purple-500"
+                      placeholder="e.g. Sarah Smith"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-slate-400 mb-1 font-bold">Performer / Act Name *</label>
+                  <input
+                    type="text"
+                    value={editForm.participantName}
+                    onChange={(e) => setEditForm({ ...editForm, participantName: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-cyan-500"
+                    placeholder="e.g. David Miller or Cathedral Choir"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block text-slate-400 mb-1 font-bold">Church / Team Name</label>
@@ -612,30 +676,15 @@ export function EventManagerController({ eventId }: { eventId: string }) {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-400 mb-1 font-bold">Performance Type</label>
-                  <select
-                    value={editForm.performanceType}
-                    onChange={(e) => setEditForm({ ...editForm, performanceType: e.target.value as any })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-cyan-500"
-                  >
-                    <option value="solo">Solo</option>
-                    <option value="duet">Duet</option>
-                    <option value="group">Group / Choir</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-bold">Sequence Order</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={editForm.performanceOrder}
-                    onChange={(e) => setEditForm({ ...editForm, performanceOrder: Number(e.target.value) || 1 })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
+              <div>
+                <label className="block text-slate-400 mb-1 font-bold">Sequence Order</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={editForm.performanceOrder}
+                  onChange={(e) => setEditForm({ ...editForm, performanceOrder: Number(e.target.value) || 1 })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-cyan-500"
+                />
               </div>
 
               <div className="space-y-2 pt-2 border-t border-slate-800">
@@ -676,7 +725,7 @@ export function EventManagerController({ eventId }: { eventId: string }) {
               </button>
               <button
                 onClick={isAddingPerformer ? handleCreatePerformer : handleSaveEdit}
-                disabled={isUpdating || !editForm.participantName.trim()}
+                disabled={isUpdating || (editForm.performanceType === 'duet' ? (!editForm.duetSinger1.trim() && !editForm.duetSinger2.trim()) : !editForm.participantName.trim())}
                 className="flex-1 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow disabled:opacity-40 flex items-center justify-center gap-1 cursor-pointer"
               >
                 <Save className="w-3.5 h-3.5" />
