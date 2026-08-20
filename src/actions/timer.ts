@@ -74,6 +74,12 @@ export async function controlTimer(actionPayload: unknown) {
         updatePayload.started_at = nowIso;
         updatePayload.paused_at = null;
         updatePayload.accumulated_duration_seconds = 0;
+
+        // Update performance status to 'performing'
+        await supabase
+          .from('performances')
+          .update({ status: 'performing', started_at: nowIso })
+          .eq('id', validated.performanceId);
       } else if (validated.action === 'pause') {
         let accum = currentAccum;
         if (timer?.status === 'running' && timer?.started_at) {
@@ -87,6 +93,11 @@ export async function controlTimer(actionPayload: unknown) {
         updatePayload.status = 'running';
         updatePayload.started_at = nowIso;
         updatePayload.paused_at = null;
+
+        await supabase
+          .from('performances')
+          .update({ status: 'performing' })
+          .eq('id', validated.performanceId);
       } else if (validated.action === 'stop') {
         let accum = currentAccum;
         if (timer?.status === 'running' && timer?.started_at) {
@@ -96,12 +107,24 @@ export async function controlTimer(actionPayload: unknown) {
         updatePayload.status = 'stopped';
         updatePayload.paused_at = nowIso;
         updatePayload.accumulated_duration_seconds = accum;
+
+        await supabase
+          .from('performances')
+          .update({ status: 'completed', completed_at: nowIso })
+          .eq('id', validated.performanceId);
       } else if (validated.action === 'reset') {
         updatePayload.status = 'idle';
         updatePayload.started_at = null;
         updatePayload.paused_at = null;
         updatePayload.accumulated_duration_seconds = 0;
         updatePayload.overtime_seconds = 0;
+
+        await supabase
+          .from('performances')
+          .update({ status: 'scheduled' })
+          .eq('id', validated.performanceId);
+      } else if (validated.action === 'update_duration' && validated.durationSeconds) {
+        updatePayload.configured_duration_seconds = validated.durationSeconds;
       }
 
       const { data: updatedTimer, error: timerErr } = await supabase
@@ -135,4 +158,34 @@ export async function controlTimer(actionPayload: unknown) {
     console.error('Timer control error:', err);
     return { success: false, error: err instanceof Error ? err.message : 'Timer operation failed' };
   }
+}
+
+export async function advancePerformanceSlot(
+  currentPerformanceId: string,
+  nextPerformanceId?: string
+) {
+  const user = await requirePermission(
+    Permissions.canAdvancePerformances,
+    'Unauthorized to advance performance slots'
+  );
+  const supabase = await createServerSupabaseClient();
+
+  // Mark current as completed
+  await supabase
+    .from('performances')
+    .update({ status: 'completed', completed_at: new Date().toISOString() })
+    .eq('id', currentPerformanceId);
+
+  // If next slot provided, mark as on_deck or performing
+  if (nextPerformanceId) {
+    await supabase
+      .from('performances')
+      .update({ status: 'on_deck' })
+      .eq('id', nextPerformanceId);
+  }
+
+  revalidatePath('/admin/control-room');
+  revalidatePath('/judge');
+
+  return { success: true };
 }

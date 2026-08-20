@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/auth/AuthContext';
 import { supabase } from '@/lib/supabase/client';
 import { Category, Performance, JudgeAssignment, TimerState, ScoreSubmission } from '@/types';
 import { computeTimerDisplay } from '@/lib/timer/authoritativeTimer';
-import { controlTimer } from '@/actions/timer';
+import { controlTimer, advancePerformanceSlot } from '@/actions/timer';
 import { reopenScore } from '@/actions/scoring';
 import { calculateAndStoreCategoryResults, approveResults, publishResults } from '@/actions/results';
 import {
@@ -26,6 +26,8 @@ import {
   Calculator,
   Lock,
   Unlock,
+  Settings2,
+  FastForward,
 } from 'lucide-react';
 
 export default function LiveControlRoomPage() {
@@ -43,6 +45,9 @@ export default function LiveControlRoomPage() {
     isWarning: false,
     isOvertime: false,
   });
+
+  const [isEditingDuration, setIsEditingDuration] = useState(false);
+  const [customDurationMinutes, setCustomDurationMinutes] = useState('5');
 
   const [reopenTarget, setReopenTarget] = useState<ScoreSubmission | null>(null);
   const [reopenReason, setReopenReason] = useState('');
@@ -261,13 +266,90 @@ export default function LiveControlRoomPage() {
   // Timer controls
   const handleTimerAction = async (action: 'start' | 'pause' | 'resume' | 'stop' | 'reset') => {
     if (!currentPerformance) return;
+
+    // Optimistic UI update
+    const nowIso = new Date().toISOString();
+    setTimerState((prev) => {
+      if (!prev) return null;
+      if (action === 'start') {
+        return { ...prev, status: 'running', startedAt: nowIso, pausedAt: null, accumulatedDurationSeconds: 0 };
+      } else if (action === 'pause') {
+        let accum = prev.accumulatedDurationSeconds || 0;
+        if (prev.status === 'running' && prev.startedAt) {
+          accum += Math.max(0, (Date.now() - new Date(prev.startedAt).getTime()) / 1000);
+        }
+        return { ...prev, status: 'paused', pausedAt: nowIso, accumulatedDurationSeconds: accum };
+      } else if (action === 'resume') {
+        return { ...prev, status: 'running', startedAt: nowIso, pausedAt: null };
+      } else if (action === 'stop') {
+        let accum = prev.accumulatedDurationSeconds || 0;
+        if (prev.status === 'running' && prev.startedAt) {
+          accum += Math.max(0, (Date.now() - new Date(prev.startedAt).getTime()) / 1000);
+        }
+        return { ...prev, status: 'stopped', pausedAt: nowIso, accumulatedDurationSeconds: accum };
+      } else if (action === 'reset') {
+        return { ...prev, status: 'idle', startedAt: null, pausedAt: null, accumulatedDurationSeconds: 0, overtimeSeconds: 0 };
+      }
+      return prev;
+    });
+
     try {
-      await controlTimer({
+      const res = await controlTimer({
         performanceId: currentPerformance.id,
         action,
       });
+
+      if (res && (res as any).timer) {
+        const t = (res as any).timer;
+        setTimerState({
+          id: t.id,
+          performanceId: t.performance_id,
+          status: t.status,
+          configuredDurationSeconds: t.configured_duration_seconds,
+          warningThresholdSeconds: t.warning_threshold_seconds,
+          startedAt: t.started_at,
+          pausedAt: t.paused_at,
+          accumulatedDurationSeconds: Number(t.accumulated_duration_seconds),
+          overtimeSeconds: Number(t.overtime_seconds),
+          updatedAt: t.updated_at,
+        });
+      }
     } catch (err: unknown) {
       console.error('Timer action failed:', err);
+    }
+  };
+
+  // Adjust timing duration (presets or custom)
+  const handleUpdateDuration = async (seconds: number) => {
+    if (!currentPerformance || seconds <= 0) return;
+    setTimerState((prev) => prev ? { ...prev, configuredDurationSeconds: seconds } : null);
+    setIsEditingDuration(false);
+    try {
+      await controlTimer({
+        performanceId: currentPerformance.id,
+        action: 'update_duration',
+        durationSeconds: seconds,
+      });
+      setStatusMessage(`Official timer adjusted to ${Math.floor(seconds / 60)}m ${seconds % 60 ? (seconds % 60) + 's' : ''}`);
+    } catch (err) {
+      console.error('Failed to update timer duration:', err);
+    }
+  };
+
+  // Advance Slot Handler
+  const handleAdvanceSlot = async () => {
+    if (!currentPerformance) return;
+    const nextPerf = performances[currentPerfIndex + 1];
+    try {
+      await advancePerformanceSlot(currentPerformance.id, nextPerf?.id);
+      if (nextPerf) {
+        setCurrentPerfIndex((p) => Math.min(performances.length - 1, p + 1));
+        setStatusMessage(`Advanced to Slot #${nextPerf.performanceOrder} (${nextPerf.participant?.firstName || 'Performer'})`);
+      } else {
+        setStatusMessage(`Marked Slot #${currentPerformance.performanceOrder} as completed.`);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to advance slot');
     }
   };
 
@@ -367,24 +449,37 @@ export default function LiveControlRoomPage() {
                   </span>
                 </div>
 
-                {/* Next / Prev Navigation Buttons */}
-                <div className="flex items-center gap-1.5">
+                {/* Next / Prev Navigation & Advance Slot Buttons */}
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 bg-slate-800/80 p-1 rounded-xl border border-slate-700/50">
+                    <button
+                      disabled={currentPerfIndex <= 0}
+                      onClick={() => setCurrentPerfIndex((p) => Math.max(0, p - 1))}
+                      className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-300 disabled:opacity-30 cursor-pointer"
+                      title="Previous Performer"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span className="text-xs text-slate-300 font-mono px-1.5">
+                      {currentPerfIndex + 1} / {performances.length}
+                    </span>
+                    <button
+                      disabled={currentPerfIndex >= performances.length - 1}
+                      onClick={() => setCurrentPerfIndex((p) => Math.min(performances.length - 1, p + 1))}
+                      className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-300 disabled:opacity-30 cursor-pointer"
+                      title="Next Performer"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+
                   <button
-                    disabled={currentPerfIndex <= 0}
-                    onClick={() => setCurrentPerfIndex((p) => Math.max(0, p - 1))}
-                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 cursor-pointer"
+                    onClick={handleAdvanceSlot}
+                    className="px-3 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 font-semibold text-xs flex items-center gap-1.5 border border-indigo-500/40 shadow-sm cursor-pointer"
+                    title="Conclude current slot and move panel to next performer"
                   >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span className="text-xs text-slate-400 font-mono">
-                    {currentPerfIndex + 1} / {performances.length}
-                  </span>
-                  <button
-                    disabled={currentPerfIndex >= performances.length - 1}
-                    onClick={() => setCurrentPerfIndex((p) => Math.min(performances.length - 1, p + 1))}
-                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 cursor-pointer"
-                  >
-                    <ChevronRight className="w-4 h-4" />
+                    <FastForward className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Advance Slot</span>
                   </button>
                 </div>
               </div>
@@ -467,6 +562,75 @@ export default function LiveControlRoomPage() {
                 >
                   <RotateCcw className="w-4 h-4" />
                 </button>
+              </div>
+
+              {/* Timing Duration Controls */}
+              <div className="mt-8 pt-6 border-t border-slate-800/80 w-full flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2 text-slate-400">
+                  <Settings2 className="w-4 h-4 text-indigo-400" />
+                  <span>Configured Duration: <strong className="text-white">{Math.floor((timerState?.configuredDurationSeconds || 300) / 60)}m {(timerState?.configuredDurationSeconds || 300) % 60 ? ((timerState?.configuredDurationSeconds || 300) % 60) + 's' : ''}</strong></span>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 mr-1">Presets:</span>
+                  {[
+                    { label: '2m', sec: 120 },
+                    { label: '3m', sec: 180 },
+                    { label: '5m', sec: 300 },
+                    { label: '8m', sec: 480 },
+                    { label: '10m', sec: 600 },
+                  ].map((p) => (
+                    <button
+                      key={p.sec}
+                      type="button"
+                      onClick={() => handleUpdateDuration(p.sec)}
+                      className={`px-2.5 py-1 rounded-lg font-mono text-xs transition-colors cursor-pointer ${
+                        timerState?.configuredDurationSeconds === p.sec
+                          ? 'bg-indigo-600 text-white font-bold'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+
+                  {isEditingDuration ? (
+                    <div className="flex items-center gap-1 ml-1 bg-slate-950 p-1 rounded-lg border border-slate-700">
+                      <input
+                        type="number"
+                        min="1"
+                        max="60"
+                        value={customDurationMinutes}
+                        onChange={(e) => setCustomDurationMinutes(e.target.value)}
+                        className="w-12 px-1 py-0.5 bg-slate-900 border border-slate-700 rounded text-center text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
+                        placeholder="min"
+                      />
+                      <span className="text-[10px] text-slate-400">min</span>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateDuration(Math.max(1, parseInt(customDurationMinutes) || 5) * 60)}
+                        className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold rounded cursor-pointer"
+                      >
+                        Set
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingDuration(false)}
+                        className="px-1.5 py-0.5 text-slate-400 hover:text-slate-200 text-[10px] cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingDuration(true)}
+                      className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-xs ml-1 flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Custom</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

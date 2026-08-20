@@ -6,9 +6,10 @@ import React, { useEffect, useState, use, useId } from 'react';
 import { Navbar } from '@/components/layout/Navbar';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { supabase } from '@/lib/supabase/client';
-import { CategoryCriterion, CriteriaVersion, Performance, ScoreSubmission } from '@/types';
+import { CategoryCriterion, CriteriaVersion, Performance, ScoreSubmission, TimerState } from '@/types';
 import { offlineDraftStore } from '@/lib/storage/offlineDraftStore';
 import { submitScore, getJudgeSubmissionForPerformance } from '@/actions/scoring';
+import { computeTimerDisplay } from '@/lib/timer/authoritativeTimer';
 import {
   Lock,
   CheckCircle2,
@@ -20,6 +21,9 @@ import {
   User,
   Award,
   Sparkles,
+  Clock,
+  Radio,
+  Hourglass,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -43,6 +47,13 @@ export default function JudgeScoringConsolePage({
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isOnline, setIsOnline] = useState(true);
 
+  const [timerState, setTimerState] = useState<TimerState | null>(null);
+  const [timerDisplay, setTimerDisplay] = useState({
+    formattedDisplay: '05:00',
+    isWarning: false,
+    isOvertime: false,
+  });
+
   // Connectivity monitoring
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -54,6 +65,20 @@ export default function JudgeScoringConsolePage({
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // Timer calculation loop
+  useEffect(() => {
+    if (!timerState) return;
+    const interval = setInterval(() => {
+      const display = computeTimerDisplay(timerState);
+      setTimerDisplay({
+        formattedDisplay: display.formattedDisplay,
+        isWarning: display.isWarning,
+        isOvertime: display.isOvertime,
+      });
+    }, 200);
+    return () => clearInterval(interval);
+  }, [timerState]);
 
   // Load performance, criteria & existing submission / draft
   useEffect(() => {
@@ -149,12 +174,33 @@ export default function JudgeScoringConsolePage({
             setMaskedFields(maskMap);
           }
         } else {
-          // 4. Recover local offline draft if present
           const draft = offlineDraftStore.getDraft(performanceId);
           if (draft) {
             setScores(draft.scores || {});
             setNotes(draft.notes || {});
           }
+        }
+
+        // 4. Load Authoritative Performance Timer
+        const { data: t } = await supabase
+          .from('timers')
+          .select('*')
+          .eq('performance_id', performanceId)
+          .maybeSingle();
+
+        if (t) {
+          setTimerState({
+            id: t.id,
+            performanceId: t.performance_id,
+            status: t.status,
+            configuredDurationSeconds: t.configured_duration_seconds,
+            warningThresholdSeconds: t.warning_threshold_seconds,
+            startedAt: t.started_at,
+            pausedAt: t.paused_at,
+            accumulatedDurationSeconds: Number(t.accumulated_duration_seconds),
+            overtimeSeconds: Number(t.overtime_seconds),
+            updatedAt: t.updated_at,
+          });
         }
       } catch (err) {
         console.error('Error initializing scoring console:', err);
@@ -162,6 +208,45 @@ export default function JudgeScoringConsolePage({
     }
 
     loadData();
+
+    // Supabase Realtime channel for live timer & performance status updates
+    const channel = supabase
+      .channel(`judge_perf_${performanceId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'timers', filter: `performance_id=eq.${performanceId}` },
+        (payload) => {
+          if (payload.new) {
+            const t = payload.new as any;
+            setTimerState({
+              id: t.id,
+              performanceId: t.performance_id,
+              status: t.status,
+              configuredDurationSeconds: t.configured_duration_seconds,
+              warningThresholdSeconds: t.warning_threshold_seconds,
+              startedAt: t.started_at,
+              pausedAt: t.paused_at,
+              accumulatedDurationSeconds: Number(t.accumulated_duration_seconds),
+              overtimeSeconds: Number(t.overtime_seconds),
+              updatedAt: t.updated_at,
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'performances', filter: `id=eq.${performanceId}` },
+        (payload) => {
+          if (payload.new) {
+            setPerformance((prev) => prev ? { ...prev, status: (payload.new as any).status } : null);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [categoryId, performanceId, user]);
 
   // Handle score change with local draft autosave
@@ -247,6 +332,10 @@ export default function JudgeScoringConsolePage({
     ? `${performance.participant.firstName} ${performance.participant.lastName}`
     : performance?.team?.name || 'Performer';
 
+  const isPerformanceActive = performance?.status === 'performing' || timerState?.status === 'running' || timerState?.status === 'paused';
+  const isPerformanceCompleted = performance?.status === 'completed';
+  const canJudgeScore = (isPerformanceActive || isPerformanceCompleted) && !isLocked;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500">
       <Navbar />
@@ -277,7 +366,7 @@ export default function JudgeScoringConsolePage({
         </div>
 
         {/* Performer Card */}
-        <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-800 rounded-2xl p-5 mb-6 shadow-xl relative overflow-hidden">
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-800 rounded-2xl p-5 mb-4 shadow-xl relative overflow-hidden">
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-2 mb-1">
@@ -299,14 +388,74 @@ export default function JudgeScoringConsolePage({
                 <Lock className="w-4 h-4" />
                 <span>Locked</span>
               </div>
-            ) : (
+            ) : isPerformanceActive ? (
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 text-xs font-bold uppercase tracking-wider">
                 <Sparkles className="w-4 h-4" />
                 <span>Scoring Active</span>
               </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 text-xs font-bold uppercase tracking-wider">
+                <Hourglass className="w-4 h-4" />
+                <span>Waiting to Start</span>
+              </div>
             )}
           </div>
         </div>
+
+        {/* Authoritative Live Clock Banner for Judge */}
+        <div className={`border rounded-2xl p-4 mb-4 shadow-xl flex items-center justify-between transition-colors ${
+          timerDisplay.isOvertime
+            ? 'bg-rose-950/40 border-rose-500/60'
+            : timerDisplay.isWarning
+            ? 'bg-amber-950/30 border-amber-500/50'
+            : 'bg-slate-900 border-slate-800'
+        }`}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center">
+              <Clock className={`w-5 h-5 ${timerDisplay.isOvertime ? 'text-rose-400 animate-pulse' : timerDisplay.isWarning ? 'text-amber-400 animate-pulse' : 'text-indigo-400'}`} />
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wider font-bold text-slate-400 flex items-center gap-1.5">
+                <span>Official Clock</span>
+                {timerState?.status === 'running' && (
+                  <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">RUNNING</span>
+                )}
+                {timerState?.status === 'paused' && (
+                  <span className="text-[10px] text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">PAUSED</span>
+                )}
+                {timerDisplay.isOvertime && (
+                  <span className="text-[10px] text-rose-400 font-bold bg-rose-500/20 px-1.5 py-0.5 rounded border border-rose-500/30">OVERTIME</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400">
+                {timerState?.status === 'running'
+                  ? 'Performance in progress'
+                  : timerState?.status === 'paused'
+                  ? 'Performance is paused'
+                  : isPerformanceCompleted
+                  ? 'Performance concluded'
+                  : 'Waiting for Scrutineer to start clock'}
+              </p>
+            </div>
+          </div>
+
+          <div className={`font-mono text-3xl sm:text-4xl font-black ${
+            timerDisplay.isOvertime ? 'text-rose-400 animate-pulse' : timerDisplay.isWarning ? 'text-amber-400 animate-pulse' : 'text-white'
+          }`}>
+            {timerDisplay.formattedDisplay}
+          </div>
+        </div>
+
+        {/* Waiting For Scrutineer Warning */}
+        {!isPerformanceActive && !isPerformanceCompleted && !isLocked && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 mb-6 flex items-center gap-3 text-amber-300 text-xs">
+            <Hourglass className="w-5 h-5 text-amber-400 shrink-0" />
+            <div>
+              <strong className="font-semibold block text-amber-200">Waiting for Scrutineer to Start Performance</strong>
+              <span>Scoring controls will automatically unlock when the Scrutineer starts the clock from the Control Room.</span>
+            </div>
+          </div>
+        )}
 
         {/* Feedback Alert */}
         {feedback && (
@@ -366,17 +515,17 @@ export default function JudgeScoringConsolePage({
                       step="0.5"
                       min="0"
                       max={crit.maxMarks}
-                      disabled={isLocked}
+                      disabled={!canJudgeScore}
                       value={currentScore !== undefined ? currentScore : ''}
                       onChange={(e) => handleScoreChange(crit.id, e.target.value, crit.maxMarks)}
                       onBlur={() => handleBlur(crit.id)}
                       placeholder="0.0"
-                      className="w-24 h-14 bg-slate-950 border border-slate-700 focus:border-indigo-500 rounded-xl text-center text-white font-mono text-2xl font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-75"
+                      className="w-24 h-14 bg-slate-950 border border-slate-700 focus:border-indigo-500 rounded-xl text-center text-white font-mono text-2xl font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   )}
 
                   {/* Preset quick buttons on desktop / tablet */}
-                  {!isLocked && (
+                  {canJudgeScore && (
                     <div className="flex flex-col gap-1">
                       <button
                         type="button"
