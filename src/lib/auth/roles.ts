@@ -5,8 +5,10 @@ import { AppRole } from '@/types';
 export const ROLE_HIERARCHY: Record<AppRole, number> = {
   super_admin: 100,
   admin: 80,
+  event_manager: 60,
   event_operator: 50,
   judge: 30,
+  public_viewer: 10,
   unauthorized: 0,
 };
 
@@ -15,13 +17,13 @@ export function hasMinimumRole(userRole: AppRole, requiredRole: AppRole): boolea
 }
 
 export const Permissions = {
-  canManageUsers: (role: AppRole) => ['super_admin', 'admin'].includes(role),
+  canManageUsers: (role: AppRole) => ['super_admin'].includes(role),
   canAuthorizeJudges: (role: AppRole) => ['super_admin', 'admin'].includes(role),
   canManageCompetitions: (role: AppRole) => ['super_admin', 'admin'].includes(role),
   canManageCategoriesAndCriteria: (role: AppRole) => ['super_admin', 'admin'].includes(role),
-  canImportParticipants: (role: AppRole) => ['super_admin', 'admin', 'event_operator'].includes(role),
-  canControlLiveTimer: (role: AppRole) => ['super_admin', 'admin', 'event_operator'].includes(role),
-  canAdvancePerformances: (role: AppRole) => ['super_admin', 'admin', 'event_operator'].includes(role),
+  canImportParticipants: (role: AppRole) => ['super_admin', 'admin', 'event_manager', 'event_operator'].includes(role),
+  canControlLiveTimer: (role: AppRole) => ['super_admin', 'admin', 'event_manager', 'event_operator'].includes(role),
+  canAdvancePerformances: (role: AppRole) => ['super_admin', 'admin', 'event_manager', 'event_operator'].includes(role),
   canScoreCategory: (role: AppRole) => ['judge', 'super_admin', 'admin'].includes(role),
   canReopenScores: (role: AppRole) => ['super_admin', 'admin'].includes(role),
   canViewUnmaskedScores: (role: AppRole) => ['super_admin', 'admin'].includes(role),
@@ -29,5 +31,5 @@ export const Permissions = {
   canApproveAndPublishResults: (role: AppRole) => ['super_admin', 'admin'].includes(role),
   canOverrideAwards: (role: AppRole) => ['super_admin', 'admin'].includes(role),
   canManageBackups: (role: AppRole) => ['super_admin', 'admin'].includes(role),
-  canAccessPracticeMode: (role: AppRole) => ['super_admin', 'admin', 'event_operator', 'judge'].includes(role),
+  canAccessPracticeMode: (role: AppRole) => ['super_admin', 'admin', 'event_manager', 'event_operator', 'judge'].includes(role),
 };

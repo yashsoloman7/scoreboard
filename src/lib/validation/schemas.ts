@@ -5,8 +5,10 @@ import { z } from 'zod';
 export const RoleEnumSchema = z.enum([
   'super_admin',
   'admin',
+  'event_manager',
   'event_operator',
   'judge',
+  'public_viewer',
   'unauthorized'
 ]);
 
@@ -74,11 +76,18 @@ export const CriteriaConfigSchema = z.object({
   criteria: z.array(CriterionItemSchema).min(1, 'At least one judging criterion is required'),
 });
 
-// 4. Participant & Team Validation
+// 4. Participant & Team Validation (Supports CSV & Google Form Importer)
 export const ParticipantImportRowSchema = z.object({
-  participantCode: z.string().min(1).max(50),
-  firstName: z.string().min(1).max(100),
-  lastName: z.string().min(1).max(100),
+  participantCode: z.string().min(1).max(50).optional(),
+  firstName: z.string().max(100).optional(),
+  lastName: z.string().max(100).optional(),
+  teamName: z.string().max(150).optional().nullable(),
+  churchName: z.string().max(200).optional().nullable(),
+  participantName: z.string().max(200).optional().nullable(),
+  performanceType: z.enum(['solo', 'duet', 'group']).default('solo'),
+  bestKeyboardist: z.string().max(150).optional().nullable(),
+  bestRhythmist: z.string().max(150).optional().nullable(),
+  bestGuitarist: z.string().max(150).optional().nullable(),
   institution: z.string().max(200).optional().nullable(),
   contactEmail: z.string().email().optional().nullable().or(z.literal('')),
   contactPhone: z.string().max(30).optional().nullable().or(z.literal('')),
@@ -115,7 +124,31 @@ export const JudgeSessionRegistrationSchema = z.object({
   fingerprint: z.string().max(256).optional().nullable(),
 });
 
-// 6. Score Submission & Entry Validation
+// 6. Cryptographic Score Submission & Admin Override Validation
+export const ScoreInputSchema = z.object({
+  eventId: z.string().uuid(),
+  participantId: z.string().uuid(),
+  category: z.enum(['solo', 'duet', 'group', 'best_keyboardist', 'best_rhythmist', 'best_guitarist']).default('solo'),
+  soloScore: z.number().min(0).max(100).default(0),
+  duetScore: z.number().min(0).max(100).default(0),
+  groupScore: z.number().min(0).max(100).default(0),
+  keyboardistScore: z.number().min(0).max(100).default(0),
+  rhythmistScore: z.number().min(0).max(100).default(0),
+  guitaristScore: z.number().min(0).max(100).default(0),
+  deviceFingerprint: z.string().optional().nullable(),
+});
+
+export const AdminScoreOverrideSchema = z.object({
+  scoreId: z.string().uuid(),
+  newSoloScore: z.number().min(0).max(100).default(0),
+  newDuetScore: z.number().min(0).max(100).default(0),
+  newGroupScore: z.number().min(0).max(100).default(0),
+  newKeyboardistScore: z.number().min(0).max(100).default(0),
+  newRhythmistScore: z.number().min(0).max(100).default(0),
+  newGuitaristScore: z.number().min(0).max(100).default(0),
+  reason: z.string().min(5, 'A clear justification is required for administrative audit logs'),
+});
+
 export const ScoreEntryItemSchema = z.object({
   criterionId: z.string().uuid(),
   rawScore: z.number().min(0, 'Score cannot be negative'),

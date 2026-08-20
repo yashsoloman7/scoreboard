@@ -1,6 +1,6 @@
 // src/types/index.ts - Core domain types for Music Competition Management & Digital Judging Platform
 
-export type AppRole = 'super_admin' | 'admin' | 'event_operator' | 'judge' | 'unauthorized';
+export type AppRole = 'super_admin' | 'admin' | 'event_manager' | 'event_operator' | 'judge' | 'public_viewer' | 'unauthorized';
 
 export type CompetitionStatus = 'draft' | 'active' | 'paused' | 'completed' | 'archived';
 export type PerformerType = 'solo' | 'duet' | 'group';
@@ -103,6 +103,15 @@ export interface Participant {
   participantCode: string;
   firstName: string;
   lastName: string;
+  teamName?: string | null;
+  churchName?: string | null;
+  participantName?: string | null;
+  performanceType?: 'solo' | 'duet' | 'group' | string;
+  bestKeyboardist?: string | null;
+  bestRhythmist?: string | null;
+  bestGuitarist?: string | null;
+  performanceOrder?: number;
+  isActive?: boolean;
   institution?: string | null;
   contactEmail?: string | null;
   contactPhone?: string | null;
@@ -340,4 +349,76 @@ export interface BackupSnapshot {
   };
   createdBy?: string | null;
   createdAt: string;
+}
+
+// Enterprise Event Staging & Cryptographic Scoring Interfaces
+export interface Score {
+  id: string;
+  eventId?: string | null;
+  participantId: string;
+  judgeId: string;
+  category: 'solo' | 'duet' | 'group' | 'best_keyboardist' | 'best_rhythmist' | 'best_guitarist' | string;
+  soloScore: number;
+  duetScore: number;
+  groupScore: number;
+  keyboardistScore: number;
+  rhythmistScore: number;
+  guitaristScore: number;
+  totalScore: number;
+  scoreHash: string;
+  isLocked: boolean;
+  deviceFingerprint?: string | null;
+  submittedAt: string;
+  isAdminOverride: boolean;
+  overrideReason?: string | null;
+  overriddenBy?: string | null;
+  overriddenAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EventState {
+  id?: string;
+  eventId: string;
+  activeParticipantId?: string | null;
+  stageMode: 'standby' | 'live' | 'completed';
+  timerStatus: 'idle' | 'running' | 'paused' | 'stopped' | 'overtime';
+  timerDurationSeconds: number;
+  timerStartedAt?: string | null;
+  timerEndsAt?: string | null;
+  timerElapsedSeconds: number;
+  isJudgeInputUnlocked: boolean;
+  currentCategory: 'solo' | 'duet' | 'group' | 'best_keyboardist' | 'best_rhythmist' | 'best_guitarist' | string;
+  updatedBy?: string | null;
+  updatedAt: string;
+  activeParticipant?: Participant | null;
+}
+
+export interface ParticipantAggregatedScore {
+  participantId: string;
+  teamName: string;
+  churchName: string;
+  participantName: string;
+  performanceType: string;
+  bestKeyboardist: string | null;
+  bestRhythmist: string | null;
+  bestGuitarist: string | null;
+  soloSums: number;
+  duetSums: number;
+  groupSums: number;
+  keyboardistSums: number;
+  rhythmistSums: number;
+  guitaristSums: number;
+  specialInstrumentTotal: number;
+  grandTotal: number;
+  judgeCount: number;
+  isTie: boolean;
+  tieCategories: string[];
+}
+
+export interface TieBreakerAlert {
+  category: string;
+  score: number;
+  tiedTeams: { participantId: string; teamName: string; churchName: string }[];
+  alertMessage: string;
 }

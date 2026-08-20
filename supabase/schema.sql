@@ -5,3 +5,4 @@
 \i migrations/20260819000001_initial_schema.sql
 \i migrations/20260819000002_rls_policies.sql
 \i migrations/20260819000003_stored_procedures.sql
+\i migrations/20260821000001_enterprise_upgrade.sql

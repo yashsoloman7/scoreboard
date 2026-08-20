@@ -15,7 +15,7 @@ export async function getParticipantsByCompetition(competitionId: string): Promi
     .from('participants')
     .select('*')
     .eq('competition_id', competitionId)
-    .order('participant_code', { ascending: true });
+    .order('performance_order', { ascending: true });
 
   if (error) {
     console.error('Error fetching participants:', error);
@@ -25,13 +25,22 @@ export async function getParticipantsByCompetition(competitionId: string): Promi
   return data.map((p) => ({
     id: p.id,
     competitionId: p.competition_id,
-    participantCode: p.participant_code,
-    firstName: p.first_name,
-    lastName: p.last_name,
-    institution: p.institution,
+    participantCode: p.participant_code || `P-${p.id.slice(0, 4)}`,
+    firstName: p.first_name || '',
+    lastName: p.last_name || '',
+    teamName: p.team_name,
+    churchName: p.church_name,
+    participantName: p.participant_name,
+    performanceType: p.performance_type || 'solo',
+    bestKeyboardist: p.best_keyboardist,
+    bestRhythmist: p.best_rhythmist,
+    bestGuitarist: p.best_guitarist,
+    performanceOrder: p.performance_order || 1,
+    isActive: p.is_active ?? true,
+    institution: p.church_name || p.institution,
     contactEmail: p.contact_email,
     contactPhone: p.contact_phone,
-    environment: p.environment,
+    environment: p.environment || 'live',
     createdAt: p.created_at,
     updatedAt: p.updated_at,
   }));
@@ -55,30 +64,41 @@ export async function importParticipantsBulk(
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     try {
-      // Upsert participant
+      const performanceOrder = row.performanceOrder || (i + 1);
+      const participantCode = row.participantCode || `P-${performanceOrder.toString().padStart(3, '0')}`;
+
+      // Upsert participant with extended enterprise fields
       const { data: pData, error: pError } = await supabase
         .from('participants')
         .upsert({
           competition_id: competitionId,
-          participant_code: row.participantCode,
-          first_name: row.firstName,
-          lastName: row.lastName,
-          institution: row.institution || null,
+          participant_code: participantCode,
+          first_name: row.firstName || row.participantName?.split(' ')[0] || 'Performer',
+          last_name: row.lastName || row.participantName?.split(' ').slice(1).join(' ') || '',
+          team_name: row.teamName || null,
+          church_name: row.churchName || row.institution || null,
+          participant_name: row.participantName || `${row.firstName || ''} ${row.lastName || ''}`.trim(),
+          performance_type: row.performanceType || 'solo',
+          best_keyboardist: row.bestKeyboardist || null,
+          best_rhythmist: row.bestRhythmist || null,
+          best_guitarist: row.bestGuitarist || null,
+          performance_order: performanceOrder,
+          institution: row.churchName || row.institution || null,
           contact_email: row.contactEmail || null,
           contact_phone: row.contactPhone || null,
           environment: 'live',
+          is_active: true,
         }, { onConflict: 'competition_id, participant_code, environment' })
         .select()
         .single();
 
       if (pError) {
-        errors.push(`Row ${i + 1} (${row.participantCode}): ${pError.message}`);
+        errors.push(`Row ${i + 1} (${participantCode}): ${pError.message}`);
         continue;
       }
 
       // Schedule performance
-      const performanceOrder = row.performanceOrder || (i + 1);
-      const performanceCode = `${row.participantCode}-R1`;
+      const performanceCode = `${participantCode}-R1`;
 
       const { data: perfData, error: perfError } = await supabase
         .from('performances')
@@ -93,7 +113,7 @@ export async function importParticipantsBulk(
         .single();
 
       if (perfError) {
-        errors.push(`Performance creation failed for ${row.participantCode}: ${perfError.message}`);
+        errors.push(`Performance creation failed for ${participantCode}: ${perfError.message}`);
       } else {
         // Initialize timer row for the performance
         await supabase.from('timers').upsert({
@@ -108,6 +128,14 @@ export async function importParticipantsBulk(
         participantCode: pData.participant_code,
         firstName: pData.first_name,
         lastName: pData.last_name,
+        teamName: pData.team_name,
+        churchName: pData.church_name,
+        participantName: pData.participant_name,
+        performanceType: pData.performance_type,
+        bestKeyboardist: pData.best_keyboardist,
+        bestRhythmist: pData.best_rhythmist,
+        bestGuitarist: pData.best_guitarist,
+        performanceOrder: pData.performance_order,
         institution: pData.institution,
         contactEmail: pData.contact_email,
         contactPhone: pData.contact_phone,
@@ -136,6 +164,8 @@ export async function importParticipantsBulk(
   });
 
   revalidatePath(`/admin/competitions/${competitionId}`);
+  revalidatePath(`/admin/staging`);
+  revalidatePath(`/live`);
 
   return {
     success: errors.length === 0,

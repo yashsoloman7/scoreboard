@@ -5,7 +5,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth/AuthContext';
-import { Award, Shield, User, LogOut, Radio, PlayCircle, Settings } from 'lucide-react';
+import { Award, Shield, User, LogOut, Radio, PlayCircle, Settings, Upload } from 'lucide-react';
 
 export function Navbar({ environment = 'live' }: { environment?: 'live' | 'practice' }) {
   const { user, signOut } = useAuth();
@@ -54,6 +54,16 @@ export function Navbar({ environment = 'live' }: { environment?: 'live' | 'pract
             </Link>
           )}
 
+          {(user?.role === 'event_manager' || user?.role === 'event_operator' || user?.role === 'admin' || user?.role === 'super_admin') && (
+            <Link
+              href="/admin/staging"
+              className="px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-900 transition-colors flex items-center gap-1.5"
+            >
+              <Radio className="w-4 h-4 text-emerald-400" />
+              <span>Stage Manager</span>
+            </Link>
+          )}
+
           {(user?.role === 'event_operator' || user?.role === 'admin' || user?.role === 'super_admin') && (
             <Link
               href="/admin/control-room"
@@ -61,6 +71,16 @@ export function Navbar({ environment = 'live' }: { environment?: 'live' | 'pract
             >
               <Radio className="w-4 h-4 text-indigo-400" />
               <span>Control Room</span>
+            </Link>
+          )}
+
+          {(user?.role === 'event_manager' || user?.role === 'event_operator' || user?.role === 'admin' || user?.role === 'super_admin') && (
+            <Link
+              href="/admin/import"
+              className="px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-900 transition-colors flex items-center gap-1.5"
+            >
+              <Upload className="w-4 h-4 text-cyan-400" />
+              <span>Import Sheet</span>
             </Link>
           )}
 
