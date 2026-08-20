@@ -1,5 +1,3 @@
-'use server';
-
 // src/lib/importers/participantImporter.ts - Comprehensive Google Sheets, CSV & Form Importer
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
