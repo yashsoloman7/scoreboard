@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import CompetitionForm from '@/components/CompetitionForm';
+import { createCompetition } from '@/actions/competitions';
 
 export default function CreateCompetition() {
     const router = useRouter();
@@ -22,7 +23,6 @@ export default function CreateCompetition() {
                 environment: 'live' as const,
             };
 
-            const { createCompetition } = await import('@/actions/competitions');
             await createCompetition(compPayload);
 
             router.push('/admin/dashboard');
