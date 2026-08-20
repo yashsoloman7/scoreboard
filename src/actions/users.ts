@@ -66,6 +66,26 @@ export async function grantUserRole(targetUserId: string, newRole: AppRole) {
     new_state: { role: newRole, userId: targetUserId },
   });
 
+  // Fetch user profile to send welcome email
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('email, full_name')
+    .eq('id', targetUserId)
+    .maybeSingle();
+
+  if (profile?.email) {
+    try {
+      const { sendWelcomeEmail } = await import('@/lib/email/welcomeEmail');
+      await sendWelcomeEmail({
+        toEmail: profile.email,
+        fullName: profile.full_name || undefined,
+        role: newRole,
+      });
+    } catch (e) {
+      console.warn('[Email Warning] Failed to send role update email:', e);
+    }
+  }
+
   revalidatePath('/admin/users');
   revalidatePath('/admin/dashboard');
 
@@ -135,7 +155,7 @@ export async function createUserWithRole(email: string, fullName: string, role: 
     targetUserId = newProfile.id;
   }
 
-  // Assign role
+  // Assign role & trigger welcome email
   await grantUserRole(targetUserId, role);
 
   revalidatePath('/admin/users');

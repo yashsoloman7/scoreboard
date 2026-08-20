@@ -1,68 +1,61 @@
-// src/middleware.ts - Edge Route Protection & Session Refresh Middleware
-
-import { NextRequest, NextResponse } from 'next/server';
-import { updateSession } from '@/lib/supabase/middleware';
+// src/middleware.ts - Next.js Supabase Session Refresh & Route Protection Middleware
+import { createServerClient } from '@supabase/ssr';
+import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers,
+    },
+  });
 
-  // Static files and auth endpoints bypass
-  if (
-    pathname.startsWith('/_next') ||
-    pathname.startsWith('/api/public') ||
-    pathname.startsWith('/favicon.ico') ||
-    pathname.startsWith('/icons') ||
-    pathname === '/auth/login' ||
-    pathname === '/auth/callback' ||
-    pathname === '/auth/unauthorized'
-  ) {
-    return NextResponse.next();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) =>
+            request.cookies.set(name, value)
+          );
+          response = NextResponse.next({
+            request,
+          });
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options)
+          );
+        },
+      },
+    }
+  );
+
+  // Refresh auth token session
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const isAuthRoute =
+    request.nextUrl.pathname.startsWith('/login') ||
+    request.nextUrl.pathname.startsWith('/auth/login');
+
+  const isProtectedRoute =
+    request.nextUrl.pathname.startsWith('/dashboard') ||
+    request.nextUrl.pathname.startsWith('/admin') ||
+    request.nextUrl.pathname.startsWith('/judge');
+
+  // Redirect unauthenticated users trying to access protected routes
+  if (isProtectedRoute && !user) {
+    const redirectUrl = new URL('/auth/login', request.url);
+    redirectUrl.searchParams.set('next', request.nextUrl.pathname);
+    return NextResponse.redirect(redirectUrl);
   }
 
-  const { response, user, supabase } = await updateSession(request);
-
-  const isProtectedAdminRoute = pathname.startsWith('/admin');
-  const isProtectedJudgeRoute = pathname.startsWith('/judge');
-  const isPracticeRoute = pathname.startsWith('/practice');
-
-  if (isProtectedAdminRoute || isProtectedJudgeRoute || isPracticeRoute) {
-    if (!user) {
-      const redirectUrl = new URL('/auth/login', request.url);
-      redirectUrl.searchParams.set('next', pathname);
-      return NextResponse.redirect(redirectUrl);
-    }
-
-    // Query user role
-    const { data: userRole } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .single();
-
-    const role = userRole?.role || 'unauthorized';
-
-    if (role === 'unauthorized') {
-      return NextResponse.redirect(new URL('/auth/unauthorized', request.url));
-    }
-
-    // Role-specific route boundaries
-    if (isProtectedAdminRoute) {
-      if (pathname.startsWith('/admin/control-room')) {
-        if (!['super_admin', 'admin', 'event_operator'].includes(role)) {
-          return NextResponse.redirect(new URL('/auth/unauthorized', request.url));
-        }
-      } else {
-        if (!['super_admin', 'admin'].includes(role)) {
-          return NextResponse.redirect(new URL('/auth/unauthorized', request.url));
-        }
-      }
-    }
-
-    if (isProtectedJudgeRoute) {
-      if (!['judge', 'admin', 'super_admin'].includes(role)) {
-        return NextResponse.redirect(new URL('/auth/unauthorized', request.url));
-      }
-    }
+  // Redirect authenticated users away from login page to dashboard
+  if (isAuthRoute && user) {
+    return NextResponse.redirect(new URL('/admin/dashboard', request.url));
   }
 
   return response;
@@ -70,9 +63,13 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/admin/:path*',
-    '/judge/:path*',
-    '/practice/:path*',
-    '/auth/:path*',
+    /*
+     * Match all request paths except:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public images/assets
+     */
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
