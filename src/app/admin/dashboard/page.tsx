@@ -21,8 +21,10 @@ import {
   Sparkles,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export default function AdminDashboardPage() {
+  const router = useRouter();
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [judges, setJudges] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,8 +93,9 @@ export default function AdminDashboardPage() {
 
   const handleLaunchPractice = async (compId: string) => {
     try {
+      setActionMessage('Initializing sandbox with demo participants and criteria...');
       await initializePracticeSandbox(compId);
-      setActionMessage('Practice mode initialized! 4 demo participants and criteria ready.');
+      router.push('/admin/control-room');
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Failed to launch practice');
     }

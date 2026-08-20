@@ -71,7 +71,7 @@ export async function initializePracticeSandbox(competitionId: string) {
         competition_id: competitionId,
         participant_code: demo.participantCode,
         first_name: demo.firstName,
-        lastName: demo.lastName,
+        last_name: demo.lastName,
         institution: demo.institution,
         environment: 'practice',
       }, { onConflict: 'competition_id, participant_code, environment' })
