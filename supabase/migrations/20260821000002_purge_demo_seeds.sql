@@ -1,6 +1,6 @@
 -- ============================================================================
 -- VERIFIED PURGE OF ALL DEMO / PRACTICE DATA
--- Exact Schema Column Alignment for PostgreSQL
+-- Exact PostgreSQL Column Case & Type Matching
 -- ============================================================================
 
 DO $$
@@ -51,7 +51,7 @@ BEGIN
 
   SELECT COALESCE(ARRAY_AGG(id), ARRAY[]::UUID[]) INTO demo_award_ids
   FROM public.awards
-  WHERE competition_id = ANY(demo_comp_ids) OR "categoryId" = ANY(demo_cat_ids);
+  WHERE competition_id = ANY(demo_comp_ids);
 
   -- 5. Identify Demo Participants & Teams
   SELECT COALESCE(ARRAY_AGG(id), ARRAY[]::UUID[]) INTO demo_part_ids
