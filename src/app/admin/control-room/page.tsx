@@ -845,10 +845,8 @@ export default function LiveControlRoomPage() {
                     <th className="px-6 py-3.5">Rank</th>
                     <th className="px-6 py-3.5">Participant / Team</th>
                     <th className="px-6 py-3.5">Code</th>
-                    <th className="px-6 py-3.5 text-center">Judges Marks Panel</th>
-                    <th className="px-6 py-3.5 text-right">Raw Avg</th>
-                    <th className="px-6 py-3.5 text-right">Variance (σ)</th>
-                    <th className="px-6 py-3.5 text-right">Final Score</th>
+                    <th className="px-6 py-3.5 text-center">Judges Signed</th>
+                    <th className="px-6 py-3.5 text-right">Grand Total (SUM)</th>
                     <th className="px-6 py-3.5 text-center">Tie Notes</th>
                   </tr>
                 </thead>
@@ -868,10 +866,10 @@ export default function LiveControlRoomPage() {
                               entry.rank === 1
                                 ? 'bg-amber-500/20 text-amber-300 font-black'
                                 : entry.rank === 2
-                                ? 'bg-slate-700 text-slate-200'
+                                ? 'bg-slate-400/20 text-slate-300 font-bold'
                                 : entry.rank === 3
-                                ? 'bg-amber-900/30 text-amber-400'
-                                : 'text-slate-400'
+                                ? 'bg-amber-700/20 text-amber-500 font-bold'
+                                : 'text-slate-500'
                             }`}
                           >
                             #{entry.rank}
@@ -897,14 +895,8 @@ export default function LiveControlRoomPage() {
                             ))}
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-right font-mono text-xs text-slate-300">
-                          {entry.rawAverage.toFixed(2)}
-                        </td>
-                        <td className="px-6 py-4 text-right font-mono text-xs text-slate-400">
-                          ±{entry.standardDeviation.toFixed(2)}
-                        </td>
-                        <td className="px-6 py-4 text-right font-mono font-bold text-base text-indigo-400">
-                          {entry.finalScore.toFixed(3)}
+                        <td className="px-6 py-4 text-right font-mono font-bold text-base text-cyan-400">
+                          {entry.finalScore.toFixed(2)}
                         </td>
                         <td className="px-6 py-4 text-center text-xs">
                           {entry.isTie ? (

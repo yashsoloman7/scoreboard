@@ -233,3 +233,103 @@ export async function getPerformancesByRound(roundId: string): Promise<Performan
     updatedAt: perf.updated_at,
   }));
 }
+
+/**
+ * Pre-Judge Participant Name & Act Editor for Event Managers and Admins
+ */
+export async function updateParticipantDetails(
+  participantId: string,
+  payload: {
+    participantName?: string;
+    firstName?: string;
+    lastName?: string;
+    churchName?: string;
+    teamName?: string;
+    performanceType?: 'solo' | 'duet' | 'group';
+    bestKeyboardist?: string | null;
+    bestRhythmist?: string | null;
+    bestGuitarist?: string | null;
+    performanceOrder?: number;
+  }
+) {
+  const user = await requirePermission(
+    Permissions.canManageParticipants,
+    'Unauthorized to edit participant details'
+  );
+  const supabase = await createServerSupabaseClient();
+
+  const updateData: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (payload.participantName !== undefined) updateData.participant_name = payload.participantName;
+  if (payload.firstName !== undefined) updateData.first_name = payload.firstName;
+  if (payload.lastName !== undefined) updateData.last_name = payload.lastName;
+  if (payload.churchName !== undefined) {
+    updateData.church_name = payload.churchName;
+    updateData.institution = payload.churchName;
+  }
+  if (payload.teamName !== undefined) updateData.team_name = payload.teamName;
+  if (payload.performanceType !== undefined) updateData.performance_type = payload.performanceType;
+  if (payload.bestKeyboardist !== undefined) updateData.best_keyboardist = payload.bestKeyboardist;
+  if (payload.bestRhythmist !== undefined) updateData.best_rhythmist = payload.bestRhythmist;
+  if (payload.bestGuitarist !== undefined) updateData.best_guitarist = payload.bestGuitarist;
+  if (payload.performanceOrder !== undefined) updateData.performance_order = payload.performanceOrder;
+
+  const { data, error } = await supabase
+    .from('participants')
+    .update(updateData)
+    .eq('id', participantId)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to update participant: ${error.message}`);
+  }
+
+  // Audit log
+  await supabase.from('audit_logs').insert({
+    competition_id: data.competition_id,
+    actor_id: user.id,
+    action: 'UPDATE_PARTICIPANT_PRE_JUDGE',
+    entity: 'participants',
+    entity_id: participantId,
+    new_state: updateData,
+  });
+
+  revalidatePath('/admin/staging');
+  revalidatePath('/judge');
+  revalidatePath('/live');
+
+  return data;
+}
+
+export async function deleteParticipant(participantId: string) {
+  const user = await requirePermission(
+    Permissions.canManageParticipants,
+    'Unauthorized to delete participant'
+  );
+  const supabase = await createServerSupabaseClient();
+
+  const { data: p } = await supabase.from('participants').select('competition_id').eq('id', participantId).maybeSingle();
+
+  const { error } = await supabase.from('participants').delete().eq('id', participantId);
+  if (error) {
+    throw new Error(`Failed to delete participant: ${error.message}`);
+  }
+
+  if (p) {
+    await supabase.from('audit_logs').insert({
+      competition_id: p.competition_id,
+      actor_id: user.id,
+      action: 'DELETE_PARTICIPANT',
+      entity: 'participants',
+      entity_id: participantId,
+    });
+    revalidatePath('/admin/staging');
+    revalidatePath('/judge');
+    revalidatePath('/live');
+  }
+
+  return { success: true };
+}

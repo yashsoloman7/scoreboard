@@ -170,3 +170,41 @@ export async function updateCompetitionSettings(
 
   revalidatePath(`/admin/competitions/${competitionId}`);
 }
+
+export async function deleteCompetition(competitionId: string) {
+  const user = await requireRole('admin');
+  const supabase = await createServerSupabaseClient();
+
+  // Fetch competition name for audit
+  const { data: comp } = await supabase
+    .from('competitions')
+    .select('name, code')
+    .eq('id', competitionId)
+    .maybeSingle();
+
+  // Delete competition (cascade handles participants, scores, timers, event_state)
+  const { error } = await supabase
+    .from('competitions')
+    .delete()
+    .eq('id', competitionId);
+
+  if (error) {
+    throw new Error(`Failed to delete competition: ${error.message}`);
+  }
+
+  // Insert audit record
+  await supabase.from('audit_logs').insert({
+    actor_id: user.id,
+    action: 'DELETE_COMPETITION',
+    entity: 'competitions',
+    entity_id: competitionId,
+    old_state: comp || { id: competitionId },
+  });
+
+  revalidatePath('/admin/dashboard');
+  revalidatePath('/admin/competitions');
+  revalidatePath('/admin/control-room');
+  revalidatePath('/live');
+
+  return { success: true };
+}

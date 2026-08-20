@@ -28,16 +28,14 @@ export function generateOfficialJudgingSheetPdf(
   // Table Data
   const tableData = entries.map((e) => [
     `#${e.rank}`,
-    e.finalScore.toFixed(3),
-    e.rawAverage.toFixed(3),
-    `±${e.standardDeviation.toFixed(3)}`,
+    e.finalScore.toFixed(2),
     e.judgeCount.toString(),
-    e.tieResolutionNote || (e.isTie ? 'Tie' : 'Clear'),
+    e.tieResolutionNote || (e.isTie ? 'Tie' : 'Official Clean'),
   ]);
 
   (doc as any).autoTable({
     startY: 40,
-    head: [['Rank', 'Final Score', 'Raw Average', 'Variance (σ)', 'Judges', 'Scrutiny Notes']],
+    head: [['Rank', 'Grand Total (SUM)', 'Judges Signed', 'Official Notes']],
     body: tableData,
     theme: 'grid',
     headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold' },

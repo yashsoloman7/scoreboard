@@ -212,9 +212,8 @@ export default function ResultsAnalysisPage() {
                                     <th className="p-4 w-16 text-center">Rank</th>
                                     <th className="p-4">Performer</th>
                                     <th className="p-4">Category</th>
-                                    <th className="p-4 text-center">Judges</th>
-                                    <th className="p-4 text-right">Avg Score</th>
-                                    <th className="p-4 text-right">Total Pts</th>
+                                    <th className="p-4 text-center">Judges Signed</th>
+                                    <th className="p-4 text-right">Grand Total (SUM)</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5">
@@ -235,11 +234,6 @@ export default function ResultsAnalysisPage() {
                                                 <div>
                                                     <div className="flex items-center gap-2">
                                                         {r.name}
-                                                        {r.stdDev > 2 && (
-                                                            <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded border border-red-500/30 uppercase font-bold" title={`High Score Variance (SD: ${r.stdDev.toFixed(2)})`}>
-                                                                Controversial
-                                                            </span>
-                                                        )}
                                                     </div>
                                                     {r.groupMembers && r.groupMembers.length > 0 && (
                                                         <div className="text-xs text-slate-500">w/ {r.groupMembers.join(', ')}</div>
@@ -250,20 +244,8 @@ export default function ResultsAnalysisPage() {
                                         <td className="p-4 text-slate-400 text-sm">{r.type}</td>
                                         <td className="p-4 text-center text-slate-400">
                                             {r.judgeCount}
-                                            {r.droppedScores && r.droppedScores.length > 0 && (
-                                                <span className="text-xs text-slate-600 block" title="Highest and Lowest scores dropped">
-                                                    (of {r.rawJudgeCount})
-                                                </span>
-                                            )}
-                                            {r.outlierScores && r.outlierScores.length > 0 && (
-                                                <span className="text-xs text-orange-400 block mt-1" title={`${r.outlierScores.length} Outlier Scores Detected`}>
-                                                    <span className="w-2 h-2 rounded-full bg-orange-500 inline-block mr-1"></span>
-                                                    {r.outlierScores.length} Outlier{r.outlierScores.length > 1 ? 's' : ''}
-                                                </span>
-                                            )}
                                         </td>
-                                        <td className="p-4 text-right font-bold text-cyan-400 text-xl">{r.averageScore.toFixed(2)}</td>
-                                        <td className="p-4 text-right text-slate-500 font-mono">{r.totalScore.toFixed(1)}</td>
+                                        <td className="p-4 text-right font-bold text-cyan-400 text-xl">{(r.totalScore || r.averageScore).toFixed(2)}</td>
                                     </motion.tr>
                                 ))}
                             </tbody>

@@ -22,6 +22,7 @@ export const Permissions = {
   canManageCompetitions: (role: AppRole) => ['super_admin', 'admin'].includes(role),
   canManageCategoriesAndCriteria: (role: AppRole) => ['super_admin', 'admin'].includes(role),
   canImportParticipants: (role: AppRole) => ['super_admin', 'admin', 'event_manager', 'event_operator'].includes(role),
+  canManageParticipants: (role: AppRole) => ['super_admin', 'admin', 'event_manager', 'event_operator'].includes(role),
   canControlLiveTimer: (role: AppRole) => ['super_admin', 'admin', 'event_manager', 'event_operator'].includes(role),
   canAdvancePerformances: (role: AppRole) => ['super_admin', 'admin', 'event_manager', 'event_operator'].includes(role),
   canScoreCategory: (role: AppRole) => ['judge', 'super_admin', 'admin'].includes(role),
