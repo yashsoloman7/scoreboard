@@ -1,6 +1,6 @@
 'use client';
 
-// src/components/judge/JudgePanel.tsx
+// src/components/judge/JudgePanel.tsx - Criteria-Based Multi-Parameter Scoring Portal
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { submitJudgeScore } from '@/actions/scoring';
@@ -11,13 +11,11 @@ import {
   Clock, 
   Send, 
   CheckCircle2, 
-  Plus, 
-  Minus,
   Sparkles,
-  Users,
+  Sliders,
+  ListOrdered,
   Music,
-  ArrowRight,
-  ListOrdered
+  Award
 } from 'lucide-react';
 
 interface JudgePanelProps {
@@ -34,10 +32,13 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
   const [hashReceipt, setHashReceipt] = useState<string | null>(null);
   const [submittedTime, setSubmittedTime] = useState<string | null>(null);
 
-  // Score states
-  const [soloScore, setSoloScore] = useState<number>(0);
-  const [duetScore, setDuetScore] = useState<number>(0);
-  const [groupScore, setGroupScore] = useState<number>(0);
+  // Criteria-Based Scores for Current Act (Max: 30 + 30 + 20 + 20 = 100 pts)
+  const [technicalityScore, setTechnicalityScore] = useState<number>(0);
+  const [presentationScore, setPresentationScore] = useState<number>(0);
+  const [rhythmScore, setRhythmScore] = useState<number>(0);
+  const [overallImpactScore, setOverallImpactScore] = useState<number>(0);
+
+  // Instrumentalist Scores (Evaluated & Totaled exclusively during/after Group Choir act)
   const [keyboardistScore, setKeyboardistScore] = useState<number>(0);
   const [rhythmistScore, setRhythmistScore] = useState<number>(0);
   const [guitaristScore, setGuitaristScore] = useState<number>(0);
@@ -50,6 +51,9 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
         const { data: comp } = await supabase
           .from('competitions')
           .select('id')
+          .neq('environment', 'practice')
+          .not('name', 'ilike', '%demo%')
+          .not('name', 'ilike', '%practice%')
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -96,7 +100,6 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
         const updated = payload.new as any;
         setEventState(updated);
 
-        // Fetch refreshed participants
         const { data: pList } = await supabase
           .from('participants')
           .select('*')
@@ -104,10 +107,12 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
           .order('performance_order', { ascending: true });
 
         if (updated.active_participant_id !== activePerformer?.id) {
+          // Reset score fields for next performer
           setHashReceipt(null);
-          setSoloScore(0);
-          setDuetScore(0);
-          setGroupScore(0);
+          setTechnicalityScore(0);
+          setPresentationScore(0);
+          setRhythmScore(0);
+          setOverallImpactScore(0);
           setKeyboardistScore(0);
           setRhythmistScore(0);
           setGuitaristScore(0);
@@ -159,32 +164,42 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
     return () => clearInterval(interval);
   }, [eventState?.stage_mode, eventState?.timer_status]);
 
-  // Strict SUM-TOTAL Calculation
-  const totalScore = 
-    soloScore + 
-    duetScore + 
-    groupScore + 
-    keyboardistScore + 
-    rhythmistScore + 
-    guitaristScore;
+  const isGroupAct = activePerformer?.performance_type === 'group';
+
+  // Vocal Criteria Subtotal (Max 100 pts)
+  const vocalSubtotal = 
+    technicalityScore + 
+    presentationScore + 
+    rhythmScore + 
+    overallImpactScore;
+
+  // Instrumentalists Subtotal (Only applicable for Group performance)
+  const instrumentsSubtotal = isGroupAct 
+    ? keyboardistScore + rhythmistScore + guitaristScore 
+    : 0;
+
+  // Strict SUM Total across criteria + instruments
+  const totalScore = vocalSubtotal + instrumentsSubtotal;
 
   const isUnlocked = eventState?.stage_mode === 'live' && eventState?.is_judge_input_unlocked;
 
   // Handle Score Submission
   const handleSubmit = async () => {
-    if (!activePerformer || !activeEventId || totalScore <= 0 || isSubmitting) return;
+    if (!activePerformer || !activeEventId || vocalSubtotal <= 0 || isSubmitting) return;
     setIsSubmitting(true);
+
+    const perfType = activePerformer.performance_type || 'solo';
 
     const res = await submitJudgeScore({
       eventId: activeEventId,
       participantId: activePerformer.id,
-      category: activePerformer.performance_type || 'solo',
-      soloScore,
-      duetScore,
-      groupScore,
-      keyboardistScore,
-      rhythmistScore,
-      guitaristScore,
+      category: perfType,
+      soloScore: perfType === 'solo' ? vocalSubtotal : 0,
+      duetScore: perfType === 'duet' ? vocalSubtotal : 0,
+      groupScore: perfType === 'group' ? vocalSubtotal : 0,
+      keyboardistScore: isGroupAct ? keyboardistScore : 0,
+      rhythmistScore: isGroupAct ? rhythmistScore : 0,
+      guitaristScore: isGroupAct ? guitaristScore : 0,
       deviceFingerprint: typeof window !== 'undefined' ? navigator.userAgent : 'mobile_client',
     });
 
@@ -204,7 +219,7 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
   };
 
   return (
-    <div className="w-full max-w-lg mx-auto bg-slate-950 text-slate-100 min-h-screen p-4 sm:p-6 pb-28 flex flex-col justify-between space-y-6">
+    <div className="w-full max-w-lg mx-auto bg-slate-950 text-slate-100 min-h-screen p-4 sm:p-6 pb-32 flex flex-col justify-between space-y-6">
       {/* Top Header Bar */}
       <div className="space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -239,18 +254,18 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
         {activePerformer ? (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-2 relative overflow-hidden">
             <div className="absolute top-0 right-0 px-3 py-1 bg-cyan-500/20 border-b border-l border-cyan-500/30 text-[10px] uppercase font-black text-cyan-300 rounded-bl-xl">
-              Now Performing • #{activePerformer.performance_order || 1}
+              Now On Stage • #{activePerformer.performance_order || 1}
             </div>
-            <span className="text-[10px] uppercase font-bold tracking-widest text-cyan-400">
-              Category: {activePerformer.performance_type || 'Solo'}
+            <span className="text-[10px] uppercase font-black tracking-widest text-cyan-400">
+              Category: {(activePerformer.performance_type || 'Solo').toUpperCase()}
             </span>
             <h2 className="text-xl font-black text-white truncate">
               {activePerformer.participant_name || activePerformer.team_name || `${activePerformer.first_name || ''} ${activePerformer.last_name || ''}`.trim()}
             </h2>
             <p className="text-xs text-slate-400 truncate">🏛️ {activePerformer.church_name || activePerformer.institution || 'Independent'}</p>
 
-            {/* Special Instrumentalists Nominations */}
-            {(activePerformer.best_keyboardist || activePerformer.best_rhythmist || activePerformer.best_guitarist) && (
+            {/* Special Instrumentalists Nominations on Group Act */}
+            {isGroupAct && (activePerformer.best_keyboardist || activePerformer.best_rhythmist || activePerformer.best_guitarist) && (
               <div className="pt-2 border-t border-slate-800/80 flex flex-wrap gap-2 text-[11px]">
                 {activePerformer.best_keyboardist && (
                   <span className="px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300">
@@ -329,45 +344,97 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
           </div>
         )}
 
-        {/* Scoring Input Widgets (Touch Steppers) */}
+        {/* 4 Core Criteria Parameter Fields (Technicality, Presentation, Rhythm, Impact) */}
         <div className={`space-y-4 transition-all duration-300 ${!isUnlocked || hashReceipt ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
-          {/* Main Category Score Input */}
-          <TouchScoreField 
-            label={`${(activePerformer?.performance_type || 'Solo').toUpperCase()} SCORE`} 
-            value={
-              activePerformer?.performance_type === 'duet' ? duetScore :
-              activePerformer?.performance_type === 'group' ? groupScore : soloScore
-            } 
-            onChange={(val) => {
-              if (activePerformer?.performance_type === 'duet') setDuetScore(val);
-              else if (activePerformer?.performance_type === 'group') setGroupScore(val);
-              else setSoloScore(val);
-            }} 
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs uppercase font-black tracking-wider text-slate-400 flex items-center gap-1.5">
+              <Sliders className="w-4 h-4 text-cyan-400" />
+              <span>{(activePerformer?.performance_type || 'Vocal').toUpperCase()} CRITERIA EVALUATION</span>
+            </span>
+            <span className="text-xs font-mono font-bold text-cyan-400">
+              Subtotal: {vocalSubtotal.toFixed(1)} / 100
+            </span>
+          </div>
+
+          {/* 1. Technicality & Vocal Precision (Max: 30) */}
+          <CriteriaTouchField
+            label="🎯 Technicality & Vocal Precision"
+            description="Pitch accuracy, intonation, vocal control, breathing & tone quality"
+            maxMarks={30}
+            value={technicalityScore}
+            onChange={setTechnicalityScore}
           />
 
-          {/* Optional Special Instrumental Scores if nominated */}
-          {activePerformer?.best_keyboardist && (
-            <TouchScoreField 
-              label={`🎹 KEYBOARDIST (${activePerformer.best_keyboardist})`} 
-              value={keyboardistScore} 
-              onChange={setKeyboardistScore} 
-            />
-          )}
+          {/* 2. Presentation & Stage Presence (Max: 30) */}
+          <CriteriaTouchField
+            label="🌟 Presentation & Stage Presence"
+            description="Expression, diction, poise, harmony blending & stage dynamics"
+            maxMarks={30}
+            value={presentationScore}
+            onChange={setPresentationScore}
+          />
 
-          {activePerformer?.best_rhythmist && (
-            <TouchScoreField 
-              label={`🥁 RHYTHMIST (${activePerformer.best_rhythmist})`} 
-              value={rhythmistScore} 
-              onChange={setRhythmistScore} 
-            />
-          )}
+          {/* 3. Rhythm, Timing & Musicality (Max: 20) */}
+          <CriteriaTouchField
+            label="⏱️ Rhythm, Timing & Musicality"
+            description="Tempo stability, groove, sync & rhythmic phrasing"
+            maxMarks={20}
+            value={rhythmScore}
+            onChange={setRhythmScore}
+          />
 
-          {activePerformer?.best_guitarist && (
-            <TouchScoreField 
-              label={`🎸 GUITARIST (${activePerformer.best_guitarist})`} 
-              value={guitaristScore} 
-              onChange={setGuitaristScore} 
-            />
+          {/* 4. Overall Impact & Artistry (Max: 20) */}
+          <CriteriaTouchField
+            label="💫 Overall Impact & Artistry"
+            description="Musical interpretation, emotional delivery & overall effect"
+            maxMarks={20}
+            value={overallImpactScore}
+            onChange={setOverallImpactScore}
+          />
+
+          {/* Special Accompanying Instrumentalists (Evaluated & Totaled ONLY during/after Group performance) */}
+          {isGroupAct && (
+            <div className="space-y-4 pt-4 border-t border-slate-800">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-xs uppercase font-black tracking-wider text-amber-400 flex items-center gap-1.5">
+                  <Music className="w-4 h-4 text-amber-400" />
+                  <span>GROUP ACCOMPANYING INSTRUMENTALISTS</span>
+                </span>
+                <span className="text-xs font-mono font-bold text-amber-400">
+                  Inst. Subtotal: {instrumentsSubtotal.toFixed(1)}
+                </span>
+              </div>
+
+              {activePerformer?.best_keyboardist && (
+                <CriteriaTouchField
+                  label={`🎹 Keyboardist (${activePerformer.best_keyboardist})`}
+                  description="Technique, harmonization, chords & accompaniment skill"
+                  maxMarks={100}
+                  value={keyboardistScore}
+                  onChange={setKeyboardistScore}
+                />
+              )}
+
+              {activePerformer?.best_rhythmist && (
+                <CriteriaTouchField
+                  label={`🥁 Rhythmist (${activePerformer.best_rhythmist})`}
+                  description="Octopad, drums, dholak, tabla rhythm, tempo hold & groove"
+                  maxMarks={100}
+                  value={rhythmistScore}
+                  onChange={setRhythmistScore}
+                />
+              )}
+
+              {activePerformer?.best_guitarist && (
+                <CriteriaTouchField
+                  label={`🎸 Guitarist (${activePerformer.best_guitarist})`}
+                  description="Lead, electric, bass guitar strumming, fills & dynamics"
+                  maxMarks={100}
+                  value={guitaristScore}
+                  onChange={setGuitaristScore}
+                />
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -376,13 +443,15 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
       <div className="fixed bottom-0 left-0 right-0 bg-slate-950/95 border-t border-slate-800/80 backdrop-blur-xl p-4 z-50">
         <div className="max-w-lg mx-auto flex items-center justify-between gap-4">
           <div>
-            <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest block">Strict Sum Total</span>
-            <span className="text-3xl font-black font-mono text-cyan-400">{totalScore.toFixed(2)}</span>
+            <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest block">
+              {isGroupAct ? 'Group & Inst. Total' : 'Act Sum Total'}
+            </span>
+            <span className="text-3xl font-black font-mono text-cyan-400">{totalScore.toFixed(1)}</span>
           </div>
 
           <button
             onClick={handleSubmit}
-            disabled={!isUnlocked || totalScore <= 0 || isSubmitting || !!hashReceipt}
+            disabled={!isUnlocked || vocalSubtotal <= 0 || isSubmitting || !!hashReceipt}
             className="flex-1 py-4 px-6 rounded-2xl font-black text-sm uppercase tracking-wide bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 shadow-xl shadow-emerald-950 disabled:opacity-40 disabled:pointer-events-none transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
           >
             {hashReceipt ? (
@@ -410,18 +479,36 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
   );
 }
 
-// Touch-Friendly Stepper Component
-function TouchScoreField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+// Reusable Criteria Touch Stepper Field
+function CriteriaTouchField({
+  label,
+  description,
+  maxMarks,
+  value,
+  onChange,
+}: {
+  label: string;
+  description?: string;
+  maxMarks: number;
+  value: number;
+  onChange: (v: number) => void;
+}) {
   const step = (delta: number) => {
-    const updated = Math.max(0, Math.min(100, Math.round((value + delta) * 10) / 10));
+    const updated = Math.max(0, Math.min(maxMarks, Math.round((value + delta) * 10) / 10));
     onChange(updated);
   };
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2 shadow-sm">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-black text-slate-300 tracking-wide truncate max-w-[200px]">{label}</span>
-        <span className="font-mono text-2xl font-black text-emerald-400">{value.toFixed(1)}</span>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <span className="text-xs font-black text-slate-200 tracking-wide block">{label}</span>
+          {description && <p className="text-[10px] text-slate-400 leading-tight mt-0.5">{description}</p>}
+        </div>
+        <div className="text-right shrink-0">
+          <span className="font-mono text-2xl font-black text-emerald-400">{value.toFixed(1)}</span>
+          <span className="text-[10px] text-slate-500 block">/ {maxMarks}</span>
+        </div>
       </div>
 
       <div className="grid grid-cols-4 gap-2 pt-1">
