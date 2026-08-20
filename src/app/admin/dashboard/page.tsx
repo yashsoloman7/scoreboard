@@ -6,6 +6,7 @@ import { Navbar } from '@/components/layout/Navbar';
 import { supabase } from '@/lib/supabase/client';
 import { Competition, UserProfile } from '@/types';
 import { deleteCompetition, createCompetition } from '@/actions/competitions';
+import { getEventCriteria, saveEventCriteria, CustomCriterion } from '@/actions/criteria';
 import { ConfirmationDialog } from '@/components/ui/ConfirmationDialog';
 import {
   Settings,
@@ -22,7 +23,10 @@ import {
   MapPin,
   X,
   Save,
-  ShieldCheck
+  ShieldCheck,
+  Sliders,
+  Plus,
+  Edit3
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -43,6 +47,11 @@ export default function AdminDashboardPage() {
     startDate: '',
     endDate: '',
   });
+
+  // Criteria Configuration Modal State
+  const [criteriaModalEvent, setCriteriaModalEvent] = useState<{ id: string; name: string } | null>(null);
+  const [criteriaList, setCriteriaList] = useState<CustomCriterion[]>([]);
+  const [isSavingCriteria, setIsSavingCriteria] = useState(false);
 
   // Confirmation Dialog State
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -67,6 +76,9 @@ export default function AdminDashboardPage() {
       const { data: compData } = await supabase
         .from('competitions')
         .select('*')
+        .neq('environment', 'practice')
+        .not('name', 'ilike', '%demo%')
+        .not('name', 'ilike', '%practice%')
         .order('created_at', { ascending: false });
 
       if (compData) {
@@ -134,7 +146,7 @@ export default function AdminDashboardPage() {
     if (!createForm.name.trim() || !createForm.code.trim()) return;
     setIsCreating(true);
     try {
-      await createCompetition({
+      const newComp = await createCompetition({
         name: createForm.name.trim(),
         code: createForm.code.trim().toUpperCase(),
         description: createForm.description.trim() || undefined,
@@ -154,6 +166,55 @@ export default function AdminDashboardPage() {
     }
   };
 
+  // Open Criteria Builder Modal
+  const openCriteriaModal = async (comp: Competition) => {
+    setCriteriaModalEvent({ id: comp.id, name: comp.name });
+    try {
+      const config = await getEventCriteria(comp.id);
+      setCriteriaList(config.criteria || []);
+    } catch (e) {
+      console.error('Failed to load criteria:', e);
+    }
+  };
+
+  const handleAddCriterion = () => {
+    setCriteriaList([
+      ...criteriaList,
+      {
+        id: `crit-${Date.now()}`,
+        name: `Criterion ${criteriaList.length + 1}`,
+        maxMarks: 25,
+        description: '',
+      },
+    ]);
+  };
+
+  const handleRemoveCriterion = (index: number) => {
+    setCriteriaList(criteriaList.filter((_, i) => i !== index));
+  };
+
+  const handleUpdateCriterion = (index: number, field: keyof CustomCriterion, value: any) => {
+    const updated = [...criteriaList];
+    updated[index] = { ...updated[index], [field]: value };
+    setCriteriaList(updated);
+  };
+
+  const handleSaveCriteria = async () => {
+    if (!criteriaModalEvent) return;
+    setIsSavingCriteria(true);
+    try {
+      await saveEventCriteria(criteriaModalEvent.id, criteriaList);
+      setActionMessage(`Criteria and weightages successfully updated for "${criteriaModalEvent.name}"`);
+      setCriteriaModalEvent(null);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Failed to save criteria');
+    } finally {
+      setIsSavingCriteria(false);
+    }
+  };
+
+  const totalCriteriaMax = criteriaList.reduce((sum, c) => sum + (Number(c.maxMarks) || 0), 0);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500">
       <Navbar />
@@ -166,7 +227,7 @@ export default function AdminDashboardPage() {
               <Settings className="w-6 h-6 text-amber-400" />
               <span>Admin Management Hub</span>
             </h1>
-            <p className="text-sm text-slate-400 mt-1">Live Event Setup, Registration Importer, and Stage Controls</p>
+            <p className="text-sm text-slate-400 mt-1">Live Event Setup, Custom Criteria Parameters & Staging Controls</p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -285,6 +346,16 @@ export default function AdminDashboardPage() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
+                    {/* Custom Criteria & Weightage Button */}
+                    <button
+                      onClick={() => openCriteriaModal(comp)}
+                      className="px-3 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Set Custom Criteria & Max Marks"
+                    >
+                      <Sliders className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Set Criteria ({totalCriteriaMax || 100} pts)</span>
+                    </button>
+
                     <Link
                       href="/admin/import"
                       className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold flex items-center gap-1.5 border border-slate-700 transition-colors"
@@ -324,6 +395,107 @@ export default function AdminDashboardPage() {
           )}
         </div>
       </main>
+
+      {/* Criteria & Weightage Configuration Modal */}
+      {criteriaModalEvent && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                  <Sliders className="w-5 h-5 text-amber-400" />
+                  Custom Criteria & Weightages
+                </h3>
+                <p className="text-xs text-slate-400">Event: {criteriaModalEvent.name}</p>
+              </div>
+              <button onClick={() => setCriteriaModalEvent(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Total Marks Summary Badge */}
+            <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-400 uppercase">Total Combined Max Marks</span>
+              <span className="font-mono text-xl font-black text-amber-400">
+                {totalCriteriaMax} Points
+              </span>
+            </div>
+
+            {/* Criteria Fields List */}
+            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+              {criteriaList.map((crit, idx) => (
+                <div key={crit.id || idx} className="p-3 bg-slate-950/80 border border-slate-800 rounded-2xl space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={crit.name}
+                      onChange={(e) => handleUpdateCriterion(idx, 'name', e.target.value)}
+                      placeholder="Criterion Name (e.g. Technicality)"
+                      className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-500"
+                    />
+                    <div className="w-24 shrink-0 flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={crit.maxMarks}
+                        onChange={(e) => handleUpdateCriterion(idx, 'maxMarks', Number(e.target.value) || 0)}
+                        className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs font-black font-mono text-amber-300 text-center focus:outline-none focus:border-amber-500"
+                      />
+                      <span className="text-[10px] text-slate-500 font-bold">pts</span>
+                    </div>
+                    {criteriaList.length > 1 && (
+                      <button
+                        onClick={() => handleRemoveCriterion(idx)}
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-900 transition-colors"
+                        title="Remove Criterion"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={crit.description || ''}
+                    onChange={(e) => handleUpdateCriterion(idx, 'description', e.target.value)}
+                    placeholder="Short description/guideline for judges (optional)"
+                    className="w-full px-3 py-1 bg-slate-900/60 border border-slate-800/60 rounded-lg text-[11px] text-slate-400 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Add Criterion Button */}
+            <button
+              type="button"
+              onClick={handleAddCriterion}
+              className="w-full py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-700 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" /> Add Another Criterion Parameter
+            </button>
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setCriteriaModalEvent(null)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCriteria}
+                disabled={isSavingCriteria || criteriaList.length === 0}
+                className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow disabled:opacity-40 flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{isSavingCriteria ? 'Saving...' : 'Save Criteria & Weightages'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create Event Modal */}
       {isCreateOpen && (

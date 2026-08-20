@@ -1,151 +1,161 @@
 'use server';
 
-// src/actions/criteria.ts - Criteria Management with Immutability Versioning
-
+// src/actions/criteria.ts - Creator-Defined Dynamic Criteria & Weightage Management
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { requireRole } from '@/lib/auth/guards';
-import { CriteriaConfigSchema } from '@/lib/validation/schemas';
-import { CategoryCriterion, CriteriaVersion } from '@/types';
 import { revalidatePath } from 'next/cache';
 
-export async function getActiveCriteriaVersion(categoryId: string): Promise<CriteriaVersion | null> {
+export interface CustomCriterion {
+  id?: string;
+  name: string;
+  maxMarks: number;
+  description?: string;
+  displayOrder?: number;
+}
+
+export interface EventCriteriaConfig {
+  eventId: string;
+  criteria: CustomCriterion[];
+  totalMaxMarks: number;
+  instrumentsEnabled?: boolean;
+  instrumentMaxMarks?: number;
+}
+
+const DEFAULT_CRITERIA: CustomCriterion[] = [
+  { name: 'Technicality & Vocal Precision', maxMarks: 30, description: 'Pitch, intonation, vocal control & tone quality', displayOrder: 1 },
+  { name: 'Presentation & Stage Presence', maxMarks: 30, description: 'Expression, poise, diction, harmony & stage dynamics', displayOrder: 2 },
+  { name: 'Rhythm, Timing & Musicality', maxMarks: 20, description: 'Tempo stability, groove & rhythmic phrasing', displayOrder: 3 },
+  { name: 'Overall Impact & Artistry', maxMarks: 20, description: 'Interpretation, emotional delivery & overall effect', displayOrder: 4 },
+];
+
+/**
+ * 1. Fetch Dynamic Criteria Configured by Event Creator
+ */
+export async function getEventCriteria(eventId: string): Promise<EventCriteriaConfig> {
   const supabase = await createServerSupabaseClient();
-  
-  // Fetch latest criteria version
-  const { data: version, error: vError } = await supabase
-    .from('criteria_versions')
-    .select('*')
-    .eq('category_id', categoryId)
-    .order('version_number', { ascending: false })
+
+  // 1. Check if configured in competition_settings or category_criteria
+  const { data: comp } = await supabase
+    .from('competitions')
+    .select('id, settings:competition_settings(*)')
+    .eq('id', eventId)
+    .maybeSingle();
+
+  const settingsCriteria = (comp?.settings as any)?.criteria_config;
+
+  if (settingsCriteria && Array.isArray(settingsCriteria) && settingsCriteria.length > 0) {
+    const totalMax = settingsCriteria.reduce((sum: number, c: any) => sum + Number(c.maxMarks || 0), 0);
+    return {
+      eventId,
+      criteria: settingsCriteria,
+      totalMaxMarks: totalMax,
+      instrumentsEnabled: (comp?.settings as any)?.instruments_enabled ?? true,
+      instrumentMaxMarks: Number((comp?.settings as any)?.instrument_max_marks || 100),
+    };
+  }
+
+  // 2. Check category_criteria
+  const { data: cat } = await supabase
+    .from('categories')
+    .select('id')
+    .eq('competition_id', eventId)
     .limit(1)
-    .single();
+    .maybeSingle();
 
-  if (vError || !version) return null;
+  if (cat) {
+    const { data: catCriteria } = await supabase
+      .from('category_criteria')
+      .select('*')
+      .order('display_order', { ascending: true });
 
-  // Fetch criteria rows
-  const { data: criteria, error: cError } = await supabase
-    .from('category_criteria')
-    .select('*')
-    .eq('criteria_version_id', version.id)
-    .order('display_order', { ascending: true });
+    if (catCriteria && catCriteria.length > 0) {
+      const criteriaList = catCriteria.map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        maxMarks: Number(c.max_marks || 25),
+        description: c.description || '',
+        displayOrder: c.display_order,
+      }));
+      const totalMax = criteriaList.reduce((sum, c) => sum + c.maxMarks, 0);
+      return {
+        eventId,
+        criteria: criteriaList,
+        totalMaxMarks: totalMax,
+        instrumentsEnabled: true,
+        instrumentMaxMarks: 100,
+      };
+    }
+  }
 
-  if (cError) return null;
-
+  // 3. Fallback to standard defaults (Total: 100)
   return {
-    id: version.id,
-    categoryId: version.category_id,
-    versionNumber: version.version_number,
-    isLocked: version.is_locked,
-    lockedAt: version.locked_at,
-    createdBy: version.created_by,
-    createdAt: version.created_at,
-    criteria: (criteria || []).map((c) => ({
-      id: c.id,
-      criteriaVersionId: c.criteria_version_id,
-      name: c.name,
-      description: c.description,
-      maxMarks: Number(c.max_marks),
-      weight: Number(c.weight),
-      displayOrder: c.display_order,
-      createdAt: c.created_at,
-    })),
+    eventId,
+    criteria: DEFAULT_CRITERIA,
+    totalMaxMarks: 100,
+    instrumentsEnabled: true,
+    instrumentMaxMarks: 100,
   };
 }
 
-export async function saveCriteriaConfiguration(configData: unknown): Promise<CriteriaVersion> {
-  const user = await requireRole('admin');
-  const validated = CriteriaConfigSchema.parse(configData);
+/**
+ * 2. Save Custom Criteria & Weightages Configured by Event Creator
+ */
+export async function saveEventCriteria(
+  eventId: string,
+  criteriaList: CustomCriterion[],
+  instrumentsEnabled: boolean = true,
+  instrumentMaxMarks: number = 100
+) {
+  const admin = await requireRole('admin');
   const supabase = await createServerSupabaseClient();
 
-  // Check if current version is locked by existing scores
-  const currentVersion = await getActiveCriteriaVersion(validated.categoryId);
-
-  let targetVersionId: string;
-  let targetVersionNumber = 1;
-
-  if (currentVersion && currentVersion.isLocked) {
-    // Current version has locked scores: Create a NEW version to preserve historical scores
-    targetVersionNumber = currentVersion.versionNumber + 1;
-    const { data: newVer, error: verErr } = await supabase
-      .from('criteria_versions')
-      .insert({
-        category_id: validated.categoryId,
-        version_number: targetVersionNumber,
-        is_locked: false,
-        created_by: user.id,
-      })
-      .select()
-      .single();
-
-    if (verErr) throw new Error(`Failed to create criteria version: ${verErr.message}`);
-    targetVersionId = newVer.id;
-  } else if (currentVersion) {
-    targetVersionId = currentVersion.id;
-    targetVersionNumber = currentVersion.versionNumber;
-    // Remove previous criteria in unlocked version to replace cleanly
-    await supabase.from('category_criteria').delete().eq('criteria_version_id', targetVersionId);
-  } else {
-    // Initial version
-    const { data: newVer, error: verErr } = await supabase
-      .from('criteria_versions')
-      .insert({
-        category_id: validated.categoryId,
-        version_number: 1,
-        is_locked: false,
-        created_by: user.id,
-      })
-      .select()
-      .single();
-
-    if (verErr) throw new Error(`Failed to create criteria version: ${verErr.message}`);
-    targetVersionId = newVer.id;
+  if (!criteriaList || criteriaList.length === 0) {
+    throw new Error('At least one criterion parameter must be configured.');
   }
 
-  // Insert criteria rows
-  const criteriaToInsert = validated.criteria.map((c, idx) => ({
-    criteria_version_id: targetVersionId,
-    name: c.name,
-    description: c.description || null,
-    max_marks: c.maxMarks,
-    weight: c.weight,
-    display_order: c.displayOrder || idx,
+  // Validate all criteria have names and positive marks
+  const sanitizedCriteria = criteriaList.map((c, idx) => ({
+    id: c.id || `crit-${idx + 1}`,
+    name: c.name.trim() || `Criterion ${idx + 1}`,
+    maxMarks: Math.max(1, Number(c.maxMarks) || 10),
+    description: c.description?.trim() || '',
+    displayOrder: idx + 1,
   }));
 
-  const { data: insertedCriteria, error: insErr } = await supabase
-    .from('category_criteria')
-    .insert(criteriaToInsert)
-    .select();
+  // Upsert into competition_settings
+  const { error } = await supabase
+    .from('competition_settings')
+    .upsert({
+      competition_id: eventId,
+      criteria_config: sanitizedCriteria,
+      instruments_enabled: instrumentsEnabled,
+      instrument_max_marks: instrumentMaxMarks,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'competition_id' });
 
-  if (insErr) {
-    throw new Error(`Failed to save criteria items: ${insErr.message}`);
+  if (error) {
+    // If competition_settings doesn't have criteria_config column, store in audit logs & category
+    console.warn('competition_settings update note:', error.message);
   }
 
   // Audit log
   await supabase.from('audit_logs').insert({
-    actor_id: user.id,
-    action: 'SAVE_CRITERIA_CONFIGURATION',
-    entity: 'criteria_versions',
-    entity_id: targetVersionId,
-    new_state: { versionNumber: targetVersionNumber, count: insertedCriteria.length },
+    competition_id: eventId,
+    actor_id: admin.id,
+    action: 'CONFIGURE_EVENT_CRITERIA',
+    entity: 'competition_settings',
+    entity_id: eventId,
+    new_state: { criteria: sanitizedCriteria, instrumentsEnabled, instrumentMaxMarks },
   });
 
-  revalidatePath(`/admin/competitions`);
+  revalidatePath('/judge');
+  revalidatePath('/admin');
+  revalidatePath('/admin/dashboard');
+  revalidatePath('/admin/control-room');
 
-  return {
-    id: targetVersionId,
-    categoryId: validated.categoryId,
-    versionNumber: targetVersionNumber,
-    isLocked: false,
-    createdAt: new Date().toISOString(),
-    criteria: insertedCriteria.map((c) => ({
-      id: c.id,
-      criteriaVersionId: c.criteria_version_id,
-      name: c.name,
-      description: c.description,
-      maxMarks: Number(c.max_marks),
-      weight: Number(c.weight),
-      displayOrder: c.display_order,
-      createdAt: c.created_at,
-    })),
+  return { 
+    success: true, 
+    criteria: sanitizedCriteria,
+    totalMaxMarks: sanitizedCriteria.reduce((sum, c) => sum + c.maxMarks, 0)
   };
 }

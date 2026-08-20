@@ -1,9 +1,10 @@
 'use client';
 
-// src/components/judge/JudgePanel.tsx - Criteria-Based Multi-Parameter Scoring Portal
+// src/components/judge/JudgePanel.tsx - Creator-Configured Dynamic Criteria Scoring Portal
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { submitJudgeScore } from '@/actions/scoring';
+import { getEventCriteria, CustomCriterion } from '@/actions/criteria';
 import { 
   ShieldCheck, 
   Lock, 
@@ -32,18 +33,17 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
   const [hashReceipt, setHashReceipt] = useState<string | null>(null);
   const [submittedTime, setSubmittedTime] = useState<string | null>(null);
 
-  // Criteria-Based Scores for Current Act (Max: 30 + 30 + 20 + 20 = 100 pts)
-  const [technicalityScore, setTechnicalityScore] = useState<number>(0);
-  const [presentationScore, setPresentationScore] = useState<number>(0);
-  const [rhythmScore, setRhythmScore] = useState<number>(0);
-  const [overallImpactScore, setOverallImpactScore] = useState<number>(0);
+  // Dynamic Criteria Configured by Event Creator
+  const [criteriaList, setCriteriaList] = useState<CustomCriterion[]>([]);
+  const [criteriaScores, setCriteriaScores] = useState<Record<string, number>>({});
+  const [totalConfiguredMax, setTotalConfiguredMax] = useState<number>(100);
 
   // Instrumentalist Scores (Evaluated & Totaled exclusively during/after Group Choir act)
   const [keyboardistScore, setKeyboardistScore] = useState<number>(0);
   const [rhythmistScore, setRhythmistScore] = useState<number>(0);
   const [guitaristScore, setGuitaristScore] = useState<number>(0);
 
-  // 1. Initial State & Queue Load
+  // 1. Initial State, Queue & Creator-Defined Criteria Load
   useEffect(() => {
     async function load() {
       let targetId = activeEventId;
@@ -64,6 +64,22 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
       }
 
       if (!targetId) return;
+
+      // Fetch dynamic criteria configured by creator
+      try {
+        const config = await getEventCriteria(targetId);
+        if (config?.criteria) {
+          setCriteriaList(config.criteria);
+          setTotalConfiguredMax(config.totalMaxMarks || 100);
+          const initialScores: Record<string, number> = {};
+          config.criteria.forEach((c, idx) => {
+            initialScores[c.id || `crit-${idx}`] = 0;
+          });
+          setCriteriaScores(initialScores);
+        }
+      } catch (e) {
+        console.error('Failed to load event criteria:', e);
+      }
 
       const [{ data: st }, { data: pList }] = await Promise.all([
         supabase.from('event_state').select('*').eq('event_id', targetId).maybeSingle(),
@@ -109,10 +125,11 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
         if (updated.active_participant_id !== activePerformer?.id) {
           // Reset score fields for next performer
           setHashReceipt(null);
-          setTechnicalityScore(0);
-          setPresentationScore(0);
-          setRhythmScore(0);
-          setOverallImpactScore(0);
+          setCriteriaScores((prev) => {
+            const reset: Record<string, number> = {};
+            Object.keys(prev).forEach((k) => (reset[k] = 0));
+            return reset;
+          });
           setKeyboardistScore(0);
           setRhythmistScore(0);
           setGuitaristScore(0);
@@ -166,19 +183,15 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
 
   const isGroupAct = activePerformer?.performance_type === 'group';
 
-  // Vocal Criteria Subtotal (Max 100 pts)
-  const vocalSubtotal = 
-    technicalityScore + 
-    presentationScore + 
-    rhythmScore + 
-    overallImpactScore;
+  // Dynamic Vocal Criteria Subtotal
+  const vocalSubtotal = Object.values(criteriaScores).reduce((sum, score) => sum + (Number(score) || 0), 0);
 
-  // Instrumentalists Subtotal (Only applicable for Group performance)
+  // Instrumentalists Subtotal (Only for Group acts)
   const instrumentsSubtotal = isGroupAct 
     ? keyboardistScore + rhythmistScore + guitaristScore 
     : 0;
 
-  // Strict SUM Total across criteria + instruments
+  // Strict SUM Total
   const totalScore = vocalSubtotal + instrumentsSubtotal;
 
   const isUnlocked = eventState?.stage_mode === 'live' && eventState?.is_judge_input_unlocked;
@@ -210,6 +223,10 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
       alert(`Submission Error: ${res.error}`);
     }
     setIsSubmitting(false);
+  };
+
+  const updateCriterionScore = (key: string, val: number) => {
+    setCriteriaScores((prev) => ({ ...prev, [key]: val }));
   };
 
   const formatTime = (secs: number) => {
@@ -264,7 +281,7 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
             </h2>
             <p className="text-xs text-slate-400 truncate">🏛️ {activePerformer.church_name || activePerformer.institution || 'Independent'}</p>
 
-            {/* Special Instrumentalists Nominations on Group Act */}
+            {/* Special Instrumentalists on Group Act */}
             {isGroupAct && (activePerformer.best_keyboardist || activePerformer.best_rhythmist || activePerformer.best_guitarist) && (
               <div className="pt-2 border-t border-slate-800/80 flex flex-wrap gap-2 text-[11px]">
                 {activePerformer.best_keyboardist && (
@@ -344,55 +361,35 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
           </div>
         )}
 
-        {/* 4 Core Criteria Parameter Fields (Technicality, Presentation, Rhythm, Impact) */}
+        {/* Dynamic Criteria Fields Defined by Event Creator */}
         <div className={`space-y-4 transition-all duration-300 ${!isUnlocked || hashReceipt ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
           <div className="flex items-center justify-between px-1">
             <span className="text-xs uppercase font-black tracking-wider text-slate-400 flex items-center gap-1.5">
               <Sliders className="w-4 h-4 text-cyan-400" />
-              <span>{(activePerformer?.performance_type || 'Vocal').toUpperCase()} CRITERIA EVALUATION</span>
+              <span>{(activePerformer?.performance_type || 'Vocal').toUpperCase()} CRITERIA (SET BY CREATOR)</span>
             </span>
             <span className="text-xs font-mono font-bold text-cyan-400">
-              Subtotal: {vocalSubtotal.toFixed(1)} / 100
+              Subtotal: {vocalSubtotal.toFixed(1)} / {totalConfiguredMax}
             </span>
           </div>
 
-          {/* 1. Technicality & Vocal Precision (Max: 30) */}
-          <CriteriaTouchField
-            label="🎯 Technicality & Vocal Precision"
-            description="Pitch accuracy, intonation, vocal control, breathing & tone quality"
-            maxMarks={30}
-            value={technicalityScore}
-            onChange={setTechnicalityScore}
-          />
+          {/* Render Each Creator-Configured Criterion Dynamically */}
+          {criteriaList.map((crit, idx) => {
+            const key = crit.id || `crit-${idx}`;
+            const currentScore = criteriaScores[key] || 0;
+            return (
+              <DynamicCriteriaTouchField
+                key={key}
+                name={crit.name}
+                description={crit.description}
+                maxMarks={crit.maxMarks}
+                value={currentScore}
+                onChange={(val) => updateCriterionScore(key, val)}
+              />
+            );
+          })}
 
-          {/* 2. Presentation & Stage Presence (Max: 30) */}
-          <CriteriaTouchField
-            label="🌟 Presentation & Stage Presence"
-            description="Expression, diction, poise, harmony blending & stage dynamics"
-            maxMarks={30}
-            value={presentationScore}
-            onChange={setPresentationScore}
-          />
-
-          {/* 3. Rhythm, Timing & Musicality (Max: 20) */}
-          <CriteriaTouchField
-            label="⏱️ Rhythm, Timing & Musicality"
-            description="Tempo stability, groove, sync & rhythmic phrasing"
-            maxMarks={20}
-            value={rhythmScore}
-            onChange={setRhythmScore}
-          />
-
-          {/* 4. Overall Impact & Artistry (Max: 20) */}
-          <CriteriaTouchField
-            label="💫 Overall Impact & Artistry"
-            description="Musical interpretation, emotional delivery & overall effect"
-            maxMarks={20}
-            value={overallImpactScore}
-            onChange={setOverallImpactScore}
-          />
-
-          {/* Special Accompanying Instrumentalists (Evaluated & Totaled ONLY during/after Group performance) */}
+          {/* Special Accompanying Instrumentalists (Totaled ONLY during/after Group performance) */}
           {isGroupAct && (
             <div className="space-y-4 pt-4 border-t border-slate-800">
               <div className="flex items-center justify-between px-1">
@@ -406,8 +403,8 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
               </div>
 
               {activePerformer?.best_keyboardist && (
-                <CriteriaTouchField
-                  label={`🎹 Keyboardist (${activePerformer.best_keyboardist})`}
+                <DynamicCriteriaTouchField
+                  name={`🎹 Keyboardist (${activePerformer.best_keyboardist})`}
                   description="Technique, harmonization, chords & accompaniment skill"
                   maxMarks={100}
                   value={keyboardistScore}
@@ -416,8 +413,8 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
               )}
 
               {activePerformer?.best_rhythmist && (
-                <CriteriaTouchField
-                  label={`🥁 Rhythmist (${activePerformer.best_rhythmist})`}
+                <DynamicCriteriaTouchField
+                  name={`🥁 Rhythmist (${activePerformer.best_rhythmist})`}
                   description="Octopad, drums, dholak, tabla rhythm, tempo hold & groove"
                   maxMarks={100}
                   value={rhythmistScore}
@@ -426,8 +423,8 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
               )}
 
               {activePerformer?.best_guitarist && (
-                <CriteriaTouchField
-                  label={`🎸 Guitarist (${activePerformer.best_guitarist})`}
+                <DynamicCriteriaTouchField
+                  name={`🎸 Guitarist (${activePerformer.best_guitarist})`}
                   description="Lead, electric, bass guitar strumming, fills & dynamics"
                   maxMarks={100}
                   value={guitaristScore}
@@ -479,15 +476,15 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
   );
 }
 
-// Reusable Criteria Touch Stepper Field
-function CriteriaTouchField({
-  label,
+// Reusable Dynamic Criteria Touch Stepper Field
+function DynamicCriteriaTouchField({
+  name,
   description,
   maxMarks,
   value,
   onChange,
 }: {
-  label: string;
+  name: string;
   description?: string;
   maxMarks: number;
   value: number;
@@ -502,7 +499,7 @@ function CriteriaTouchField({
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2 shadow-sm">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <span className="text-xs font-black text-slate-200 tracking-wide block">{label}</span>
+          <span className="text-xs font-black text-slate-200 tracking-wide block">{name}</span>
           {description && <p className="text-[10px] text-slate-400 leading-tight mt-0.5">{description}</p>}
         </div>
         <div className="text-right shrink-0">
