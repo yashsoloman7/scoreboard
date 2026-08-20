@@ -17,7 +17,8 @@ import {
   X,
   PlusCircle,
   Save,
-  Trash2
+  Trash2,
+  Mail
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -268,15 +269,33 @@ export default function AdminUsersPage() {
                         </select>
                       </td>
                       <td className="py-3.5 px-4 text-right">
-                        {u.role !== 'unauthorized' && (
+                        <div className="flex items-center justify-end gap-1.5">
                           <button
-                            onClick={() => handleRevokeRoleRequest(u)}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-400 transition-colors cursor-pointer"
-                            title="Revoke Role Access"
+                            onClick={async () => {
+                              try {
+                                const { sendWelcomeEmailToUser } = await import('@/actions/users');
+                                await sendWelcomeEmailToUser(u.email, u.role, u.fullName);
+                                setActionMessage(`Welcome email sent to ${u.email}`);
+                              } catch (e: unknown) {
+                                alert(`Failed to send email: ${e instanceof Error ? e.message : 'Error'}`);
+                              }
+                            }}
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-cyan-950 text-slate-400 hover:text-cyan-300 transition-colors cursor-pointer"
+                            title={`Send Welcome Email to ${u.email}`}
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Mail className="w-4 h-4" />
                           </button>
-                        )}
+
+                          {u.role !== 'unauthorized' && (
+                            <button
+                              onClick={() => handleRevokeRoleRequest(u)}
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-400 transition-colors cursor-pointer"
+                              title="Revoke Role Access"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))

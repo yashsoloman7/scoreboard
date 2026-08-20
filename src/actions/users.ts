@@ -163,3 +163,19 @@ export async function createUserWithRole(email: string, fullName: string, role: 
 
   return { success: true, userId: targetUserId };
 }
+
+/**
+ * Direct trigger welcome email
+ */
+export async function sendWelcomeEmailToUser(
+  email: string,
+  role: AppRole = 'super_admin',
+  fullName: string = 'CC Church Bhilai Administrator'
+) {
+  const { sendWelcomeEmail } = await import('@/lib/email/welcomeEmail');
+  return await sendWelcomeEmail({
+    toEmail: email.trim().toLowerCase(),
+    fullName,
+    role,
+  });
+}
