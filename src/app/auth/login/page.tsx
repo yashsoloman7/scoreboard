@@ -2,13 +2,26 @@
 
 // src/app/auth/login/page.tsx - Modern, secure Multi-Provider Authentication Portal
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { Award, ShieldCheck, Lock, AlertCircle, Mail, KeyRound, Sparkles, CheckCircle2, UserCheck, ArrowRight } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center px-4">
+        <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-indigo-500 mb-3"></div>
+        <p className="text-xs text-slate-400 font-mono">Loading authentication portal...</p>
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
+  );
+}
+
+function LoginContent() {
   const { user, signInWithGoogle, signInWithEmail, signUpWithEmail, isLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();

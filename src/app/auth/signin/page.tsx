@@ -2,10 +2,22 @@
 
 // src/app/auth/signin/page.tsx - Redirector to unified /auth/login portal
 
-import { useEffect } from 'react';
+import { useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 export default function SignInRedirectPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100">
+        <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-indigo-500"></div>
+      </div>
+    }>
+      <SignInRedirectContent />
+    </Suspense>
+  );
+}
+
+function SignInRedirectContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
