@@ -3,6 +3,7 @@
 // src/actions/scoring.ts - Server-authoritative Score Submission, Cryptographic Hashing, Strict SUM-TOTAL, & Tie-Breaker Engine
 
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { requireAuth, requireRole } from '@/lib/auth/guards';
 import { ScoreSubmissionSchema, ScoreReopenSchema, ScoreInputSchema, AdminScoreOverrideSchema } from '@/lib/validation/schemas';
 import { ScoreSubmission, ParticipantAggregatedScore, TieBreakerAlert } from '@/types';
@@ -19,6 +20,7 @@ export async function submitJudgeScore(input: unknown) {
     const user = await requireAuth();
     const validated = ScoreInputSchema.parse(input);
     const supabase = await createServerSupabaseClient();
+    const adminSupabase = createAdminClient();
 
     // 1. Verify Event is in Live Mode and inputs are unlocked
     const { data: state, error: stateErr } = await supabase
@@ -62,8 +64,8 @@ export async function submitJudgeScore(input: unknown) {
       strictTotalSum
     );
 
-    // 4. Atomic Database Insert/Lock
-    const { data: scoreRecord, error: scoreErr } = await supabase
+    // 4. Atomic Database Insert/Lock using elevated client to enforce server authority
+    const { data: scoreRecord, error: scoreErr } = await adminSupabase
       .from('scores')
       .upsert({
         event_id: validated.eventId,

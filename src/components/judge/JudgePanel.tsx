@@ -208,10 +208,13 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
 
   const isUnlocked = eventState?.stage_mode === 'live' && eventState?.is_judge_input_unlocked;
 
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+
   // Handle Score Submission
   const handleSubmit = async () => {
     if (!activePerformer || !activeEventId || vocalSubtotal <= 0 || isSubmitting) return;
     setIsSubmitting(true);
+    setSubmissionError(null);
 
     const perfType = activePerformer.performance_type || 'solo';
 
@@ -231,8 +234,9 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
     if (res.success && res.hashReceipt) {
       setHashReceipt(res.hashReceipt);
       setSubmittedTime(res.submittedAt || new Date().toISOString());
+      setSubmissionError(null);
     } else {
-      alert(`Submission Error: ${res.error}`);
+      setSubmissionError(res.error || 'Failed to submit official score. Ensure live stage is active.');
     }
     setIsSubmitting(false);
   };
@@ -263,6 +267,13 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
             {isUnlocked ? 'LIVE STAGE' : 'STANDBY (LOCKED)'}
           </span>
         </div>
+
+        {submissionError && (
+          <div className="bg-rose-500/15 border border-rose-500/30 rounded-2xl p-3.5 flex items-center gap-2.5 text-xs text-rose-300">
+            <span className="font-bold shrink-0">⚠ Error:</span>
+            <span>{submissionError}</span>
+          </div>
+        )}
 
         {/* Authoritative Live Timer Sync Banner */}
         {isUnlocked && (

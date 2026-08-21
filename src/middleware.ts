@@ -1,6 +1,7 @@
 // src/middleware.ts - Next.js Supabase Session Refresh & Route Protection Middleware
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { env } from '@/lib/env';
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
@@ -9,9 +10,12 @@ export async function middleware(request: NextRequest) {
     },
   });
 
+  const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseKey,
     {
       cookies: {
         getAll() {
@@ -39,7 +43,8 @@ export async function middleware(request: NextRequest) {
 
   const isAuthRoute =
     request.nextUrl.pathname.startsWith('/login') ||
-    request.nextUrl.pathname.startsWith('/auth/login');
+    request.nextUrl.pathname.startsWith('/auth/login') ||
+    request.nextUrl.pathname.startsWith('/auth/signin');
 
   const isProtectedRoute =
     request.nextUrl.pathname.startsWith('/dashboard') ||
@@ -51,11 +56,6 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = new URL('/auth/login', request.url);
     redirectUrl.searchParams.set('next', request.nextUrl.pathname);
     return NextResponse.redirect(redirectUrl);
-  }
-
-  // Redirect authenticated users away from login page to dashboard
-  if (isAuthRoute && user) {
-    return NextResponse.redirect(new URL('/admin/dashboard', request.url));
   }
 
   return response;

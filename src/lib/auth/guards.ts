@@ -34,7 +34,7 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
     .from('profiles')
     .select('id, email, full_name, phone_number, avatar_url, is_active')
     .eq('id', user.id)
-    .single();
+    .maybeSingle();
 
   const { data: userRoleData } = await supabase
     .from('user_roles')
@@ -42,7 +42,7 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   const role: AppRole = (userRoleData?.role as AppRole) || 'unauthorized';
 

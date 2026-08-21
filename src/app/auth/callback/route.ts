@@ -28,12 +28,16 @@ export async function GET(request: Request) {
           .from('user_roles')
           .select('role')
           .eq('user_id', user.id)
-          .single();
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
         const role = userRole?.role;
 
         if (role === 'super_admin' || role === 'admin') {
           return NextResponse.redirect(new URL('/admin/dashboard', request.url));
+        } else if (role === 'event_manager') {
+          return NextResponse.redirect(new URL('/admin/staging', request.url));
         } else if (role === 'event_operator') {
           return NextResponse.redirect(new URL('/admin/control-room', request.url));
         } else if (role === 'judge') {
