@@ -3,6 +3,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { AppRole, UserProfile } from '@/types';
 import { Permissions, hasMinimumRole } from './roles';
+import { MASTER_SUPER_ADMIN_EMAIL } from '@/lib/constants';
 
 export class AuthorizationError extends Error {
   constructor(message = 'Access Denied: Insufficient Permissions') {
@@ -60,6 +61,9 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
     }
   }
 
+  const userEmail = (user.email || activeProfile?.email || '').toLowerCase().trim();
+  const isMasterAdmin = userEmail === MASTER_SUPER_ADMIN_EMAIL.toLowerCase();
+
   const { data: userRoleData } = await supabase
     .from('user_roles')
     .select('role')
@@ -69,15 +73,17 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
     .maybeSingle();
 
   const role: AppRole =
-    (userRoleData?.role as AppRole) ||
-    (user.app_metadata?.role as AppRole) ||
-    (user.user_metadata?.role as AppRole) ||
-    'unauthorized';
+    isMasterAdmin
+      ? 'super_admin'
+      : (userRoleData?.role as AppRole) ||
+        (user.app_metadata?.role as AppRole) ||
+        (user.user_metadata?.role as AppRole) ||
+        'unauthorized';
 
   return {
     id: user.id,
     email: user.email || activeProfile?.email || '',
-    fullName: activeProfile?.full_name || user.user_metadata?.full_name || 'User',
+    fullName: isMasterAdmin ? 'Master Super Administrator' : (activeProfile?.full_name || user.user_metadata?.full_name || 'User'),
     phoneNumber: activeProfile?.phone_number || null,
     avatarUrl: activeProfile?.avatar_url || user.user_metadata?.avatar_url || null,
     isActive: activeProfile?.is_active ?? true,

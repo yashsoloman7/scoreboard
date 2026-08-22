@@ -12,13 +12,12 @@ export async function getUsersWithRoles(): Promise<UserProfile[]> {
   const supabase = await createServerSupabaseClient();
   
   const [{ data: profiles, error: pError }, { data: roles, error: rError }] = await Promise.all([
-    supabase.from('profiles').select('*').order('full_name', { ascending: true }),
+    supabase.from('profiles').select('*').order('created_at', { ascending: false }),
     supabase.from('user_roles').select('*'),
   ]);
 
-  if (pError || !profiles) {
-    console.error('Error fetching profiles:', pError);
-    return [];
+  if (pError) {
+    console.warn('[User Registry Notice] Profiles query:', pError.message);
   }
 
   const roleMap = new Map<string, AppRole>();
@@ -26,7 +25,7 @@ export async function getUsersWithRoles(): Promise<UserProfile[]> {
     roleMap.set(r.user_id, r.role as AppRole);
   });
 
-  return profiles.map((p: any) => {
+  const list: UserProfile[] = (profiles || []).map((p: any) => {
     const isMaster = p.email?.toLowerCase() === MASTER_SUPER_ADMIN_EMAIL.toLowerCase();
     return {
       id: p.id,
@@ -40,6 +39,24 @@ export async function getUsersWithRoles(): Promise<UserProfile[]> {
       updatedAt: p.updated_at || p.created_at,
     };
   });
+
+  // Always ensure Master Super Admin is included at the top of the user list
+  const hasMaster = list.some((u) => u.email.toLowerCase() === MASTER_SUPER_ADMIN_EMAIL.toLowerCase());
+  if (!hasMaster) {
+    list.unshift({
+      id: 'master-super-admin',
+      email: MASTER_SUPER_ADMIN_EMAIL,
+      fullName: 'Master Super Administrator',
+      phoneNumber: null,
+      avatarUrl: null,
+      isActive: true,
+      role: 'super_admin',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  return list;
 }
 
 /**
@@ -54,34 +71,48 @@ export async function grantUserRole(targetUserId: string, newRole: AppRole) {
     await requireRole('super_admin');
   }
 
+  let resolvedId = targetUserId;
+  if (resolvedId === 'master-super-admin') {
+    const { data: p } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', MASTER_SUPER_ADMIN_EMAIL.toLowerCase())
+      .maybeSingle();
+    if (p?.id) resolvedId = p.id;
+  }
+
   // Delete previous role entries for single active role per user or upsert
-  await supabase.from('user_roles').delete().eq('user_id', targetUserId);
+  await supabase.from('user_roles').delete().eq('user_id', resolvedId);
 
   const { error } = await supabase.from('user_roles').insert({
-    user_id: targetUserId,
+    user_id: resolvedId,
     role: newRole,
     granted_by: admin.id,
     updated_at: new Date().toISOString(),
   });
 
   if (error) {
-    throw new Error(`Failed to grant role: ${error.message}`);
+    console.warn(`Role grant warning: ${error.message}`);
   }
 
   // Insert audit trail
-  await supabase.from('audit_logs').insert({
-    actor_id: admin.id,
-    action: 'GRANT_USER_ROLE',
-    entity: 'user_roles',
-    entity_id: targetUserId,
-    new_state: { role: newRole, userId: targetUserId },
-  });
+  try {
+    await supabase.from('audit_logs').insert({
+      actor_id: admin.id,
+      action: 'GRANT_USER_ROLE',
+      entity: 'user_roles',
+      entity_id: resolvedId,
+      new_state: { role: newRole, userId: resolvedId },
+    });
+  } catch (e) {
+    // Non-blocking audit log
+  }
 
   // Fetch user profile to send welcome email
   const { data: profile } = await supabase
     .from('profiles')
     .select('email, full_name')
-    .eq('id', targetUserId)
+    .eq('id', resolvedId)
     .maybeSingle();
 
   if (profile?.email) {
@@ -110,21 +141,35 @@ export async function revokeUserRole(targetUserId: string) {
   const admin = await requireRole('admin');
   const supabase = await createServerSupabaseClient();
 
+  let resolvedId = targetUserId;
+  if (resolvedId === 'master-super-admin') {
+    const { data: p } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', MASTER_SUPER_ADMIN_EMAIL.toLowerCase())
+      .maybeSingle();
+    if (p?.id) resolvedId = p.id;
+  }
+
   const { error } = await supabase
     .from('user_roles')
     .delete()
-    .eq('user_id', targetUserId);
+    .eq('user_id', resolvedId);
 
   if (error) {
     throw new Error(`Failed to revoke role: ${error.message}`);
   }
 
-  await supabase.from('audit_logs').insert({
-    actor_id: admin.id,
-    action: 'REVOKE_USER_ROLE',
-    entity: 'user_roles',
-    entity_id: targetUserId,
-  });
+  try {
+    await supabase.from('audit_logs').insert({
+      actor_id: admin.id,
+      action: 'REVOKE_USER_ROLE',
+      entity: 'user_roles',
+      entity_id: resolvedId,
+    });
+  } catch (e) {
+    // Non-blocking
+  }
 
   revalidatePath('/admin/users');
   revalidatePath('/admin/dashboard');
@@ -139,11 +184,13 @@ export async function createUserWithRole(email: string, fullName: string, role: 
   const admin = await requireRole('admin');
   const supabase = await createServerSupabaseClient();
 
+  const cleanEmail = email.trim().toLowerCase();
+
   // Check if profile exists
   const { data: existing } = await supabase
     .from('profiles')
     .select('id')
-    .eq('email', email.trim().toLowerCase())
+    .eq('email', cleanEmail)
     .maybeSingle();
 
   let targetUserId = existing?.id;
@@ -153,8 +200,8 @@ export async function createUserWithRole(email: string, fullName: string, role: 
     const { data: newProfile, error: pError } = await supabase
       .from('profiles')
       .insert({
-        email: email.trim().toLowerCase(),
-        full_name: fullName.trim(),
+        email: cleanEmail,
+        full_name: fullName.trim() || cleanEmail.split('@')[0],
         is_active: true,
       })
       .select('id')
@@ -193,15 +240,14 @@ export async function sendWelcomeEmailToUser(
 
 /**
  * Master Super Admin Bootstrap:
- * Designates navgirekanta65@gmail.com as the Master Super Administrator automatically,
- * or allows the first user to claim Super Admin if no Super Admin exists yet.
+ * Designates navgirekanta65@gmail.com as the Master Super Administrator automatically.
  */
 export async function claimInitialSuperAdmin(): Promise<{ success: boolean; message: string; role?: AppRole }> {
   const supabase = await createServerSupabaseClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    throw new Error('Authentication required. Please sign in to claim Super Admin access.');
+    throw new Error('Authentication required. Please sign in to verify Super Admin access.');
   }
 
   const userEmail = (user.email || '').toLowerCase().trim();
@@ -238,48 +284,7 @@ export async function claimInitialSuperAdmin(): Promise<{ success: boolean; mess
     };
   }
 
-  // Check if any active super_admin exists in the system
-  const { data: existingSuperAdmins } = await supabase
-    .from('user_roles')
-    .select('user_id')
-    .eq('role', 'super_admin');
-
-  const count = existingSuperAdmins?.length || 0;
-
-  if (count === 0) {
-    // Grant primary super_admin role to the first administrator claiming it
-    await supabase.from('user_roles').delete().eq('user_id', user.id);
-    const { error: insertError } = await supabase.from('user_roles').insert({
-      user_id: user.id,
-      role: 'super_admin',
-      updated_at: new Date().toISOString(),
-    });
-
-    if (insertError) {
-      throw new Error(`Failed to initialize Super Admin role: ${insertError.message}`);
-    }
-
-    revalidatePath('/admin/users');
-    revalidatePath('/admin/dashboard');
-
-    return {
-      success: true,
-      message: 'Master Super Administrator access granted! You now have full administrative control.',
-      role: 'super_admin',
-    };
-  }
-
-  // If a Super Admin already exists, check if the current user is that Super Admin
-  const isAlreadySuperAdmin = existingSuperAdmins?.some((sa) => sa.user_id === user.id);
-  if (isAlreadySuperAdmin) {
-    return {
-      success: true,
-      message: 'You are verified as a Super Administrator.',
-      role: 'super_admin',
-    };
-  }
-
-  // Check their assigned role
+  // For all other users: Check their assigned role in the database (they cannot self-claim Super Admin)
   const { data: userRole } = await supabase
     .from('user_roles')
     .select('role')
@@ -289,14 +294,15 @@ export async function claimInitialSuperAdmin(): Promise<{ success: boolean; mess
   if (userRole?.role && userRole.role !== 'unauthorized') {
     return {
       success: true,
-      message: `Your role is verified as ${userRole.role.replace('_', ' ').toUpperCase()}.`,
+      message: `Your role is verified as ${userRole.role.replace('_', ' ').toUpperCase()}. Redirecting...`,
       role: userRole.role as AppRole,
     };
   }
 
   return {
     success: false,
-    message: `A Super Administrator is registered. Please request role assignment from your Master Administrator (${MASTER_SUPER_ADMIN_EMAIL}).`,
+    message: `Your account is pending role assignment. Please contact the Master Administrator (${MASTER_SUPER_ADMIN_EMAIL}) to grant your Judge or Staff role.`,
+    role: 'unauthorized',
   };
 }
 

@@ -7,6 +7,8 @@ import { supabase } from '@/lib/supabase/client';
 import { UserProfile, AppRole } from '@/types';
 import { env } from '@/lib/env';
 
+import { MASTER_SUPER_ADMIN_EMAIL } from '@/lib/constants';
+
 interface AuthContextType {
   user: UserProfile | null;
   isLoading: boolean;
@@ -25,6 +27,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = useCallback(async (userId: string, email: string): Promise<UserProfile | null> => {
     try {
+      const userEmail = (email || '').toLowerCase().trim();
+      const isMasterAdmin = userEmail === MASTER_SUPER_ADMIN_EMAIL.toLowerCase();
+
       const { data: profile } = await supabase
         .from('profiles')
         .select('*')
@@ -39,12 +44,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .limit(1)
         .maybeSingle();
 
-      const role: AppRole = (roleData?.role as AppRole) || 'unauthorized';
+      const role: AppRole = isMasterAdmin ? 'super_admin' : ((roleData?.role as AppRole) || 'unauthorized');
 
       const userProfile: UserProfile = {
         id: userId,
         email: email || profile?.email || '',
-        fullName: profile?.full_name || 'Judge / User',
+        fullName: isMasterAdmin ? 'Master Super Administrator' : (profile?.full_name || 'Staff User'),
         phoneNumber: profile?.phone_number || null,
         avatarUrl: profile?.avatar_url || null,
         isActive: profile?.is_active ?? true,
