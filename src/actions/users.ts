@@ -185,3 +185,101 @@ export async function sendWelcomeEmailToUser(
     role,
   });
 }
+
+/**
+ * Master Super Admin Bootstrap:
+ * Allows the initial system administrator / creator to claim the primary Super Admin role
+ * if no Super Admin is currently registered in the database, or automatically checks and elevates.
+ */
+export async function claimInitialSuperAdmin(): Promise<{ success: boolean; message: string; role?: AppRole }> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    throw new Error('Authentication required. Please sign in to claim Super Admin access.');
+  }
+
+  // Check if any active super_admin exists in the system
+  const { data: existingSuperAdmins } = await supabase
+    .from('user_roles')
+    .select('user_id')
+    .eq('role', 'super_admin');
+
+  const count = existingSuperAdmins?.length || 0;
+
+  // Ensure profiles record exists
+  await supabase.from('profiles').upsert({
+    id: user.id,
+    email: user.email!,
+    full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Super Administrator',
+    is_active: true,
+  }, { onConflict: 'id' });
+
+  if (count === 0) {
+    // Grant primary super_admin role to the first administrator claiming it
+    await supabase.from('user_roles').delete().eq('user_id', user.id);
+    const { error: insertError } = await supabase.from('user_roles').insert({
+      user_id: user.id,
+      role: 'super_admin',
+      updated_at: new Date().toISOString(),
+    });
+
+    if (insertError) {
+      throw new Error(`Failed to initialize Super Admin role: ${insertError.message}`);
+    }
+
+    revalidatePath('/admin/users');
+    revalidatePath('/admin/dashboard');
+
+    return {
+      success: true,
+      message: 'Master Super Administrator access granted! You now have full administrative control.',
+      role: 'super_admin',
+    };
+  }
+
+  // If a Super Admin already exists, check if the current user is that Super Admin
+  const isAlreadySuperAdmin = existingSuperAdmins?.some((sa) => sa.user_id === user.id);
+  if (isAlreadySuperAdmin) {
+    return {
+      success: true,
+      message: 'You are verified as a Super Administrator.',
+      role: 'super_admin',
+    };
+  }
+
+  // If other Super Admins exist and current user is not one, check their assigned role
+  const { data: userRole } = await supabase
+    .from('user_roles')
+    .select('role')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (userRole?.role && userRole.role !== 'unauthorized') {
+    return {
+      success: true,
+      message: `Your role is verified as ${userRole.role.replace('_', ' ').toUpperCase()}.`,
+      role: userRole.role as AppRole,
+    };
+  }
+
+  return {
+    success: false,
+    message: 'A Super Administrator is already registered. Please request role assignment from your Master Admin.',
+  };
+}
+
+/**
+ * Check if the system has any active Super Admin configured
+ */
+export async function getSuperAdminStatus(): Promise<{ hasSuperAdmin: boolean }> {
+  const supabase = await createServerSupabaseClient();
+  const { data } = await supabase
+    .from('user_roles')
+    .select('user_id')
+    .eq('role', 'super_admin')
+    .limit(1);
+
+  return { hasSuperAdmin: (data?.length || 0) > 0 };
+}
+

@@ -111,9 +111,43 @@ export function Navbar({ environment = 'live' }: { environment?: 'live' | 'pract
             <div className="flex items-center gap-2.5">
               <div className="hidden sm:flex flex-col items-end">
                 <span className="text-xs font-semibold text-slate-200">{user.fullName}</span>
-                <span className="text-[10px] uppercase font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">
-                  {user.role.replace('_', ' ')}
-                </span>
+                <div className="flex items-center gap-1">
+                  {user.role === 'super_admin' && (
+                    <span className="text-[10px] uppercase font-black text-amber-300 bg-gradient-to-r from-amber-500/20 to-purple-500/20 px-2 py-0.5 rounded-md border border-amber-500/40 shadow-sm flex items-center gap-1">
+                      <span>👑</span>
+                      <span>Super Admin</span>
+                    </span>
+                  )}
+                  {user.role === 'admin' && (
+                    <span className="text-[10px] uppercase font-bold text-indigo-300 bg-indigo-500/15 px-1.5 py-0.5 rounded-md border border-indigo-500/30 flex items-center gap-1">
+                      <Shield className="w-3 h-3 text-indigo-400" />
+                      <span>Admin</span>
+                    </span>
+                  )}
+                  {user.role === 'event_manager' && (
+                    <span className="text-[10px] uppercase font-bold text-emerald-300 bg-emerald-500/15 px-1.5 py-0.5 rounded-md border border-emerald-500/30 flex items-center gap-1">
+                      <Radio className="w-3 h-3 text-emerald-400" />
+                      <span>Stage Manager</span>
+                    </span>
+                  )}
+                  {user.role === 'event_operator' && (
+                    <span className="text-[10px] uppercase font-bold text-cyan-300 bg-cyan-500/15 px-1.5 py-0.5 rounded-md border border-cyan-500/30 flex items-center gap-1">
+                      <Radio className="w-3 h-3 text-cyan-400" />
+                      <span>Control Room</span>
+                    </span>
+                  )}
+                  {user.role === 'judge' && (
+                    <span className="text-[10px] uppercase font-bold text-amber-300 bg-amber-500/15 px-1.5 py-0.5 rounded-md border border-amber-500/30 flex items-center gap-1">
+                      <Award className="w-3 h-3 text-amber-400" />
+                      <span>Judge</span>
+                    </span>
+                  )}
+                  {user.role === 'unauthorized' && (
+                    <span className="text-[10px] uppercase font-bold text-rose-300 bg-rose-500/15 px-1.5 py-0.5 rounded-md border border-rose-500/30">
+                      Pending Auth
+                    </span>
+                  )}
+                </div>
               </div>
 
               <button
@@ -130,7 +164,7 @@ export function Navbar({ environment = 'live' }: { environment?: 'live' | 'pract
               className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs shadow-md shadow-indigo-600/20 transition-all flex items-center gap-1.5"
             >
               <Shield className="w-3.5 h-3.5" />
-              <span>Judge / Admin Login</span>
+              <span>Judge / Staff Sign In</span>
             </Link>
           )}
         </div>
