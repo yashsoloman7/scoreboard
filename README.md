@@ -1,4 +1,4 @@
-# 🌌 Antigravity — Next-Gen Competition Management & Broadcast Suite
+# 🌌 Score Board — Next-Gen Competition Management & Broadcast Suite
 
 > **Ultra-modern, server-authoritative live competition engine powered by Next.js App Router, Supabase RBAC Auth, Framer Motion, and Google Sheets API.**
 
@@ -6,7 +6,7 @@
 
 ## ✨ Overview
 
-**Antigravity** is a competition management and digital broadcast platform designed for live music championships, choir festivals, and staged competitions. It combines high-end esports/broadcast aesthetics with a modular architecture:
+**Score Board** is a competition management and digital broadcast platform designed for live music championships, choir festivals, and staged competitions. It combines high-end esports/broadcast aesthetics with a modular architecture:
 
 * **Frontend:** Next.js (App Router), TypeScript, Tailwind CSS, Framer Motion (physics-based layout transitions & drag-and-drop), and Shadcn UI.
 * **Authentication & RBAC:** Supabase Auth (strictly manages logins and role permissions).
@@ -112,7 +112,7 @@ npm run build
 │   │   ├── auth/         # Login & Role Authorization Verification
 │   │   ├── judge/        # Blind Scoring Touch Portal
 │   │   └── live/         # Public Esports Broadcast Leaderboard
-│   ├── components/       # Antigravity UI Components (Navbar, Leaderboard, Staging)
+│   ├── components/       # Score Board UI Components (Navbar, Leaderboard, Staging)
 │   ├── lib/              # Core Services (Google Sheets REST API, Supabase Auth)
 │   ├── types/            # TypeScript Domain Definitions
 │   └── __tests__/        # Automated Test Suites (Vitest)
@@ -123,4 +123,4 @@ npm run build
 ---
 
 ## 📜 License
-MIT © Antigravity Competition Engineering Team
+MIT © Score Board Competition Engineering Team

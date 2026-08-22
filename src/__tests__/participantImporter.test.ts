@@ -94,4 +94,36 @@ P-301,Charlie,Brown,valid@example.com`;
     expect(duetActs[1].participantName).toBe('Pratush & Ashish');
     expect(duetActs[2].participantName).toBe('A. Nageshwar Rao & Y. Kiran Kumar');
   });
+
+  it('correctly processes full 15-act sample contestant sheet across 5 churches', () => {
+    const sampleCsv = `Timestamp,Email Address,Church Name,Pastor Name,Choir Leader Name,Solo Participant Name,Duet Participant 1,Duet Participant 2,Keyboardist Name,Rhythmist / Drums Name,Guitarist Name,Total Participants
+2026-08-20 10:00:00,bhilai@church.org,Bhilai Central Church,Rev. Thomas,Samuel K.,Pratush Hemrm,Parina H. George,B. Paulina,John Samuel,David Raj,Philip K.,15
+2026-08-20 10:15:00,raipur@church.org,St. Thomas Cathedral Raipur,Fr. Mathew,Rachel J.,A. Nageshwar Rao,Raj Abhishek Singh,Shifa Masih,Grace Paul,Stephen M.,Daniel V.,18
+2026-08-20 10:30:00,durg@church.org,Grace Fellowship Durg,Pastor John,Timothy B.,Sneha Singh,Vijay Kumar,Priya Sharma,Timothy B.,Karan Joshua,Anand M.,14
+2026-08-20 10:45:00,bilaspur@church.org,Emmanuel Methodist Bilaspur,Rev. Wilson,Esther R.,Rohan Masih,Sunil Das,Anita Minz,Mark Philip,James Luke,Peter S.,16
+2026-08-20 11:00:00,nagpur@church.org,Zion City Church Nagpur,Bishop Paul,Nehemiah T.,Debasish Sen,Rahul Verma,Preeti Toppo,Nehemiah T.,Samson G.,Joshua K.,20`;
+
+    const registrations = parseGoogleFormRegistrations(sampleCsv, 'csv');
+    expect(registrations.length).toBe(5);
+
+    const generatedActs = convertGoogleFormsToCompetitionActs(registrations);
+    expect(generatedActs.length).toBe(15); // 5 Solo + 5 Duet + 5 Group acts
+
+    const solos = generatedActs.filter((a) => a.performanceType === 'solo');
+    const duets = generatedActs.filter((a) => a.performanceType === 'duet');
+    const groups = generatedActs.filter((a) => a.performanceType === 'group');
+
+    expect(solos.length).toBe(5);
+    expect(duets.length).toBe(5);
+    expect(groups.length).toBe(5);
+
+    // Duet verification: both singer names present
+    expect(duets[0].participantName).toBe('Parina H. George & B. Paulina');
+    expect(duets[1].participantName).toBe('Raj Abhishek Singh & Shifa Masih');
+
+    // Group choir instrumentalists verification
+    expect(groups[0].bestKeyboardist).toBe('John Samuel');
+    expect(groups[0].bestRhythmist).toBe('David Raj');
+    expect(groups[0].bestGuitarist).toBe('Philip K.');
+  });
 });

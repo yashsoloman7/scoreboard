@@ -82,7 +82,7 @@ export function PublicLeaderboard() {
                 </span>
               </div>
               <h1 className="text-2xl sm:text-4xl font-black tracking-tight text-white mt-0.5 flex items-center gap-2">
-                <span>Antigravity Championship</span>
+                <span>Score Board Championship</span>
                 <span className="text-xs font-mono font-normal text-slate-400 px-2 py-0.5 rounded bg-slate-900 border border-slate-800 hidden sm:inline-block">
                   Broadcast Suite
                 </span>

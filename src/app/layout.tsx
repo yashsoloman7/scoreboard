@@ -4,12 +4,11 @@ import { AuthProvider } from "@/lib/auth/AuthContext";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
-
+const geist = Geist({ subsets: ['latin'], variable: '--font-sans' });
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Music Competition Management & Digital Judging Platform",
+  title: "Score Board — Live Competition Management & Judging Platform",
   description: "Production-grade, server-authoritative live event judging system for music competitions",
 };
 

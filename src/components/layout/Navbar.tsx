@@ -30,7 +30,7 @@ export function Navbar({ environment = 'live' }: { environment?: 'live' | 'pract
           </div>
           <div className="flex flex-col">
             <span className="font-black text-white text-base leading-tight tracking-tight flex items-center gap-1">
-              <span>Antigravity</span>
+              <span>Score Board</span>
               <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
             </span>
             <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">Competition Engine</span>

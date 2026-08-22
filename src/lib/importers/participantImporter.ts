@@ -182,13 +182,13 @@ function normalizeRowKeys(row: Record<string, unknown>, index = 0): Record<strin
       normalized['pastorName'] = strVal;
     }
     // 6. Specific Instrument Columns
-    else if (['bestkeyboardist', 'keyboard', 'keys', 'pianist', 'piano'].includes(lowerKey)) {
+    else if (['bestkeyboardist', 'keyboard', 'keyboardist', 'keyboardistname', 'keys', 'pianist', 'piano'].includes(lowerKey)) {
       normalized['keyboardist'] = strVal || null;
       normalized['bestKeyboardist'] = strVal || null;
-    } else if (['bestrhythmist', 'rhythmist', 'drums', 'drummer', 'percussion', 'octopaddrums', 'octopad', 'octapad', 'octapaddrums'].includes(lowerKey)) {
+    } else if (['bestrhythmist', 'rhythmist', 'rhythmistname', 'rhythmistdrumsname', 'drums', 'drummer', 'percussion', 'octopaddrums', 'octopad', 'octapad', 'octapaddrums'].includes(lowerKey)) {
       normalized['octopadDrums'] = strVal || null;
       normalized['bestRhythmist'] = strVal || null;
-    } else if (['bestguitarist', 'guitar', 'guitarist', 'acousticguitar', 'leadguitar'].includes(lowerKey)) {
+    } else if (['bestguitarist', 'guitar', 'guitarist', 'guitaristname', 'acousticguitar', 'leadguitar'].includes(lowerKey)) {
       normalized['guitarist'] = strVal || null;
       normalized['bestGuitarist'] = strVal || null;
     } else if (['electricguitar'].includes(lowerKey)) {

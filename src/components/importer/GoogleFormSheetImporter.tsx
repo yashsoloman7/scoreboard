@@ -143,6 +143,19 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
     }
   };
 
+  const SAMPLE_SHEET_CSV = `Timestamp,Email Address,Church Name,Pastor Name,Choir Leader Name,Solo Participant Name,Duet Participant 1,Duet Participant 2,Keyboardist Name,Rhythmist / Drums Name,Guitarist Name,Total Participants
+2026-08-20 10:00:00,bhilai@church.org,Bhilai Central Church,Rev. Thomas,Samuel K.,Pratush Hemrm,Parina H. George,B. Paulina,John Samuel,David Raj,Philip K.,15
+2026-08-20 10:15:00,raipur@church.org,St. Thomas Cathedral Raipur,Fr. Mathew,Rachel J.,A. Nageshwar Rao,Raj Abhishek Singh,Shifa Masih,Grace Paul,Stephen M.,Daniel V.,18
+2026-08-20 10:30:00,durg@church.org,Grace Fellowship Durg,Pastor John,Timothy B.,Sneha Singh,Vijay Kumar,Priya Sharma,Timothy B.,Karan Joshua,Anand M.,14
+2026-08-20 10:45:00,bilaspur@church.org,Emmanuel Methodist Bilaspur,Rev. Wilson,Esther R.,Rohan Masih,Sunil Das,Anita Minz,Mark Philip,James Luke,Peter S.,16
+2026-08-20 11:00:00,nagpur@church.org,Zion City Church Nagpur,Bishop Paul,Nehemiah T.,Debasish Sen,Rahul Verma,Preeti Toppo,Nehemiah T.,Samson G.,Joshua K.,20`;
+
+  const handleLoadSampleData = () => {
+    setPastedData(SAMPLE_SHEET_CSV);
+    setImportMode('paste');
+    handleProcessText(SAMPLE_SHEET_CSV);
+  };
+
   return (
     <div className="w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 text-white shadow-2xl space-y-8">
       {/* Header */}
@@ -157,36 +170,46 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
             </span>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            Supports exact sheet format: Sno, Church Name, Solo, Duet, Guitar, Electric, Bass, Octopad/Drums, Keyboard, Dholak, Harmonium, Tabla, Clap Box, Saxophone, Basuri.
+            Supports exact sheet format: Sno, Church Name, Solo, Duet (both singers), Group Choir, and individual instrument columns.
           </p>
         </div>
 
-        {/* Import Mode Selector Tabs */}
-        <div className="flex items-center gap-1.5 p-1 bg-slate-950 rounded-2xl border border-slate-800">
+        {/* Sample Data Trigger & Import Mode Selector Tabs */}
+        <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => setImportMode('upload')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              importMode === 'upload' ? 'bg-cyan-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
-            }`}
+            onClick={handleLoadSampleData}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 shadow-lg shadow-amber-950 transition-all transform active:scale-95 cursor-pointer"
           >
-            <Upload className="w-4 h-4" /> Upload CSV
+            <Sparkles className="w-4 h-4 text-slate-950" />
+            <span>⚡ Load Sample Contestant Sheet (15 Acts)</span>
           </button>
-          <button
-            onClick={() => setImportMode('sheets_link')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              importMode === 'sheets_link' ? 'bg-cyan-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <LinkIcon className="w-4 h-4" /> Google Sheet Link
-          </button>
-          <button
-            onClick={() => setImportMode('paste')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              importMode === 'paste' ? 'bg-cyan-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Clipboard className="w-4 h-4" /> Paste Text
-          </button>
+
+          <div className="flex items-center gap-1.5 p-1 bg-slate-950 rounded-2xl border border-slate-800">
+            <button
+              onClick={() => setImportMode('upload')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                importMode === 'upload' ? 'bg-cyan-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Upload className="w-4 h-4" /> Upload CSV
+            </button>
+            <button
+              onClick={() => setImportMode('sheets_link')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                importMode === 'sheets_link' ? 'bg-cyan-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <LinkIcon className="w-4 h-4" /> Google Sheet Link
+            </button>
+            <button
+              onClick={() => setImportMode('paste')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                importMode === 'paste' ? 'bg-cyan-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Clipboard className="w-4 h-4" /> Paste Text
+            </button>
+          </div>
         </div>
       </div>
 
