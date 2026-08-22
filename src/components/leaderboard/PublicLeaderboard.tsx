@@ -1,6 +1,6 @@
 'use client';
 
-// src/components/leaderboard/PublicLeaderboard.tsx - Antigravity Next-Gen Esports Broadcast Leaderboard
+// src/components/leaderboard/PublicLeaderboard.tsx - Real-Time Competition Broadcast Leaderboard
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchSheetLeaderboardAction } from '@/actions/sheets';
@@ -18,7 +18,8 @@ import {
   Crown,
   ChevronRight,
   Flame,
-  Activity
+  Activity,
+  Clock
 } from 'lucide-react';
 
 export function PublicLeaderboard() {
@@ -35,7 +36,7 @@ export function PublicLeaderboard() {
       setParticipants(data);
       setLastRefreshed(new Date().toLocaleTimeString());
     } catch (err) {
-      console.error('Failed to load Google Sheets leaderboard:', err);
+      console.error('Failed to load real standings:', err);
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -44,8 +45,8 @@ export function PublicLeaderboard() {
 
   useEffect(() => {
     loadData();
-    // Realtime background sync polling every 4 seconds
-    const interval = setInterval(loadData, 4000);
+    // Realtime background sync polling every 3 seconds
+    const interval = setInterval(loadData, 3000);
     return () => clearInterval(interval);
   }, [loadData]);
 
@@ -55,11 +56,19 @@ export function PublicLeaderboard() {
     return p.category.toLowerCase() === selectedCategory.toLowerCase();
   });
 
+  // Calculate real scored acts vs pending acts
+  const scoredActs = filtered.filter((p) => p.totalScore > 0);
+  const pendingActs = filtered.filter((p) => p.totalScore === 0);
+
+  // Re-rank scored acts within current view
+  const rankedScoredActs = scoredActs
+    .sort((a, b) => b.totalScore - a.totalScore)
+    .map((p, idx) => ({ ...p, rank: idx + 1 }));
+
   const activeLivePerformer = participants.find((p) => p.status === 'live');
 
-  // Top 3 Podium
-  const topThree = filtered.slice(0, 3);
-  const remainingList = filtered.slice(3);
+  // Top 3 Podium (Only for real scored acts)
+  const topThree = rankedScoredActs.slice(0, 3);
 
   return (
     <div className="w-full min-h-screen antigravity-bg py-8 px-4 sm:px-6 lg:px-8 space-y-8 selection:bg-cyan-500 selection:text-slate-950">
@@ -75,7 +84,7 @@ export function PublicLeaderboard() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black uppercase tracking-widest text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">
-                  Live Google Sheets Sync
+                  Live Authoritative Standings
                 </span>
                 <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
                   <Activity className="w-3 h-3 text-emerald-400 animate-pulse" /> {lastRefreshed ? `Updated ${lastRefreshed}` : 'Connecting...'}
@@ -112,7 +121,7 @@ export function PublicLeaderboard() {
             onClick={loadData}
             disabled={isRefreshing}
             className="p-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-white/10 transition-all cursor-pointer"
-            title="Refresh Leaderboard"
+            title="Refresh Real Standings"
           >
             <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-cyan-400' : ''}`} />
           </button>
@@ -136,8 +145,8 @@ export function PublicLeaderboard() {
         ))}
       </div>
 
-      {/* Top 3 Esports Podium Showcase */}
-      {topThree.length >= 3 && selectedCategory === 'All' && (
+      {/* Real Top 3 Podium (Displayed only when real scores exist) */}
+      {topThree.length >= 3 ? (
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
           {/* #2 Silver Podium */}
           <motion.div
@@ -156,7 +165,7 @@ export function PublicLeaderboard() {
             </div>
             <div className="pt-6 mt-4 border-t border-white/5 flex items-center justify-between">
               <span className="text-[10px] font-bold text-slate-500 uppercase">Category: {topThree[1].category}</span>
-              <span className="font-mono text-2xl font-black text-slate-200">{topThree[1].totalScore.toFixed(1)} <span className="text-xs text-slate-500">pts</span></span>
+              <span className="font-mono text-2xl font-black text-slate-200">{topThree[1].totalScore.toFixed(2)} <span className="text-xs text-slate-500">pts</span></span>
             </div>
           </motion.div>
 
@@ -177,7 +186,7 @@ export function PublicLeaderboard() {
             </div>
             <div className="pt-6 mt-4 border-t border-amber-500/20 flex items-center justify-between">
               <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Category: {topThree[0].category}</span>
-              <span className="font-mono text-3xl font-black text-amber-400">{topThree[0].totalScore.toFixed(1)} <span className="text-xs text-amber-300/80">pts</span></span>
+              <span className="font-mono text-3xl font-black text-amber-400">{topThree[0].totalScore.toFixed(2)} <span className="text-xs text-amber-300/80">pts</span></span>
             </div>
           </motion.div>
 
@@ -198,79 +207,123 @@ export function PublicLeaderboard() {
             </div>
             <div className="pt-6 mt-4 border-t border-white/5 flex items-center justify-between">
               <span className="text-[10px] font-bold text-slate-500 uppercase">Category: {topThree[2].category}</span>
-              <span className="font-mono text-2xl font-black text-amber-500">{topThree[2].totalScore.toFixed(1)} <span className="text-xs text-slate-500">pts</span></span>
+              <span className="font-mono text-2xl font-black text-amber-500">{topThree[2].totalScore.toFixed(2)} <span className="text-xs text-slate-500">pts</span></span>
             </div>
           </motion.div>
+        </div>
+      ) : topThree.length > 0 ? (
+        <div className="max-w-7xl mx-auto p-6 rounded-3xl bg-slate-900/60 border border-white/10 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Crown className="w-6 h-6 text-amber-400" />
+            <div>
+              <h3 className="font-bold text-white text-base">Current Leader: {topThree[0].name} ({topThree[0].totalScore.toFixed(2)} pts)</h3>
+              <p className="text-xs text-slate-400">Additional acts will appear on the digital podium as judges submit marks.</p>
+            </div>
+          </div>
+          <span className="text-xs font-mono text-cyan-400 bg-cyan-500/10 px-3 py-1.5 rounded-xl border border-cyan-500/20">
+            {scoredActs.length} Act(s) Scored
+          </span>
+        </div>
+      ) : (
+        <div className="max-w-7xl mx-auto p-8 rounded-3xl bg-slate-900/40 border border-white/5 text-center space-y-2">
+          <Clock className="w-8 h-8 text-cyan-400 mx-auto animate-pulse" />
+          <h3 className="text-lg font-bold text-white">Live Stage in Progress — Awaiting First Official Scores</h3>
+          <p className="text-xs text-slate-400 max-w-md mx-auto">
+            Judges are currently evaluating performances in the hall. Official scores and champion rankings will lock onto the digital podium upon submission.
+          </p>
         </div>
       )}
 
       {/* Full Leaderboard Table / Cards */}
       <div className="max-w-7xl mx-auto space-y-3">
         <div className="flex items-center justify-between px-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
-          <span>Rank & Performer</span>
-          <span>Score Breakdown & Total</span>
+          <span>Rank & Performer Lineup</span>
+          <span>Official Score Status</span>
         </div>
 
         {loading ? (
-          <div className="p-12 text-center text-slate-500 font-mono text-xs">Synchronizing with Google Sheets...</div>
-        ) : filtered.length === 0 ? (
-          <div className="p-12 text-center text-slate-500 text-xs">No contestant scores found in Google Sheet.</div>
+          <div className="p-12 text-center text-slate-500 font-mono text-xs">Synchronizing official standings...</div>
+        ) : [...rankedScoredActs, ...pendingActs].length === 0 ? (
+          <div className="p-12 text-center text-slate-500 text-xs">No registered contestants found.</div>
         ) : (
           <AnimatePresence>
-            {filtered.map((item, idx) => (
-              <motion.div
-                key={item.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: idx * 0.03 }}
-                className={`antigravity-glass rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border transition-all ${
-                  item.rank === 1
-                    ? 'border-amber-500/50 bg-amber-500/5'
-                    : item.rank === 2
-                    ? 'border-slate-400/30'
-                    : item.rank === 3
-                    ? 'border-amber-700/30'
-                    : 'border-white/5 hover:border-white/10'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-mono font-black text-sm shrink-0 ${
+            {[...rankedScoredActs, ...pendingActs].map((item, idx) => {
+              const hasScore = item.totalScore > 0;
+              return (
+                <motion.div
+                  key={item.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: idx * 0.02 }}
+                  className={`antigravity-glass rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border transition-all ${
                     item.rank === 1
-                      ? 'bg-amber-400 text-slate-950 shadow-md shadow-amber-400/30'
+                      ? 'border-amber-500/50 bg-amber-500/5 shadow-lg shadow-amber-500/5'
                       : item.rank === 2
-                      ? 'bg-slate-300 text-slate-950'
+                      ? 'border-slate-400/30'
                       : item.rank === 3
-                      ? 'bg-amber-700 text-white'
-                      : 'bg-slate-900 border border-slate-800 text-slate-400'
-                  }`}>
-                    #{item.rank || idx + 1}
-                  </div>
-
-                  <div className="min-w-0 space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-black uppercase text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">
-                        {item.category}
-                      </span>
-                      <span className="text-xs font-mono text-slate-500">{item.code}</span>
-                      {item.status === 'live' && (
-                        <span className="text-[9px] font-black text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded animate-pulse">
-                          LIVE ON STAGE
-                        </span>
-                      )}
+                      ? 'border-amber-700/30'
+                      : hasScore
+                      ? 'border-cyan-500/20 bg-cyan-950/10'
+                      : 'border-white/5 hover:border-white/10 opacity-80'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-mono font-black text-sm shrink-0 ${
+                      item.rank === 1
+                        ? 'bg-amber-400 text-slate-950 shadow-md shadow-amber-400/30'
+                        : item.rank === 2
+                        ? 'bg-slate-300 text-slate-950'
+                        : item.rank === 3
+                        ? 'bg-amber-700 text-white'
+                        : hasScore
+                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                        : 'bg-slate-900 border border-slate-800 text-slate-500'
+                    }`}>
+                      {hasScore ? `#${item.rank}` : `S-${item.sequence}`}
                     </div>
-                    <h4 className="font-bold text-base text-white truncate">{item.name}</h4>
-                    <p className="text-xs text-slate-400 truncate">🏛️ {item.churchOrTeam}</p>
-                  </div>
-                </div>
 
-                <div className="flex items-center justify-between sm:justify-end gap-6 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
-                  <div className="text-right space-y-1">
-                    <span className="text-[10px] uppercase font-bold text-slate-500 block">Total Score</span>
-                    <span className="font-mono text-2xl font-black text-cyan-400">{item.totalScore.toFixed(1)} <span className="text-xs text-slate-400 font-normal">pts</span></span>
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black uppercase text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">
+                          {item.category}
+                        </span>
+                        <span className="text-xs font-mono text-slate-500">{item.code}</span>
+                        {item.status === 'live' && (
+                          <span className="text-[9px] font-black text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded animate-pulse">
+                            ● LIVE ON STAGE
+                          </span>
+                        )}
+                        {item.status === 'on_deck' && (
+                          <span className="text-[9px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                            ON DECK
+                          </span>
+                        )}
+                      </div>
+                      <h4 className="font-bold text-base text-white truncate">{item.name}</h4>
+                      <p className="text-xs text-slate-400 truncate">🏛️ {item.churchOrTeam}</p>
+                    </div>
                   </div>
-                </div>
-              </motion.div>
-            ))}
+
+                  <div className="flex items-center justify-between sm:justify-end gap-6 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                    {hasScore ? (
+                      <div className="text-right space-y-0.5">
+                        <span className="text-[10px] uppercase font-bold text-emerald-400 block">Verified Score</span>
+                        <span className="font-mono text-2xl font-black text-cyan-400">
+                          {item.totalScore.toFixed(2)} <span className="text-xs text-slate-400 font-normal">pts</span>
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-right space-y-0.5">
+                        <span className="text-[10px] uppercase font-bold text-slate-500 block">Status</span>
+                        <span className="text-xs font-mono text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg inline-block">
+                          Pending Score
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
           </AnimatePresence>
         )}
       </div>

@@ -1,4 +1,4 @@
-// src/lib/sheets/googleSheetsService.ts - Lightweight Google Sheets API Integration Engine for Antigravity
+import { supabase } from '../supabase/client';
 
 export interface SheetParticipant {
   id: string;
@@ -33,8 +33,8 @@ export interface SheetJudgeScoreInput {
   submittedAt: string;
 }
 
-// In-Memory Simulated State for instant local/preview testing when Service Account credentials are not yet entered
-let simulatedParticipants: SheetParticipant[] = [
+// In-Memory Live State: Starts with 0.0 scores so only REAL judge submissions establish standings
+let inMemoryParticipants: SheetParticipant[] = [
   {
     id: 'P-001',
     sequence: 1,
@@ -42,12 +42,11 @@ let simulatedParticipants: SheetParticipant[] = [
     name: 'Pratush Hemrm',
     category: 'Solo',
     churchOrTeam: 'Bhilai Central Church',
-    status: 'completed',
-    soloScore: 88.5,
+    status: 'standby',
+    soloScore: 0,
     duetScore: 0,
     groupScore: 0,
-    totalScore: 88.5,
-    rank: 1,
+    totalScore: 0,
   },
   {
     id: 'P-002',
@@ -56,12 +55,11 @@ let simulatedParticipants: SheetParticipant[] = [
     name: 'Parina H. George & B. Paulina',
     category: 'Duet',
     churchOrTeam: 'St. Thomas Cathedral Raipur',
-    status: 'live',
+    status: 'standby',
     soloScore: 0,
-    duetScore: 92.0,
+    duetScore: 0,
     groupScore: 0,
-    totalScore: 92.0,
-    rank: 2,
+    totalScore: 0,
   },
   {
     id: 'P-003',
@@ -70,12 +68,11 @@ let simulatedParticipants: SheetParticipant[] = [
     name: 'Grace Fellowship Choir',
     category: 'Group',
     churchOrTeam: 'Grace Fellowship Durg',
-    status: 'on_deck',
+    status: 'standby',
     soloScore: 0,
     duetScore: 0,
-    groupScore: 95.5,
-    totalScore: 95.5,
-    rank: 3,
+    groupScore: 0,
+    totalScore: 0,
     keyboardist: 'John Samuel',
     rhythmist: 'David Raj',
     guitarist: 'Philip K.',
@@ -88,11 +85,10 @@ let simulatedParticipants: SheetParticipant[] = [
     category: 'Solo',
     churchOrTeam: 'Bethel Assembly Bhilai',
     status: 'standby',
-    soloScore: 84.0,
+    soloScore: 0,
     duetScore: 0,
     groupScore: 0,
-    totalScore: 84.0,
-    rank: 4,
+    totalScore: 0,
   },
   {
     id: 'P-005',
@@ -103,10 +99,9 @@ let simulatedParticipants: SheetParticipant[] = [
     churchOrTeam: 'Emmanuel Methodist Bilaspur',
     status: 'standby',
     soloScore: 0,
-    duetScore: 89.5,
+    duetScore: 0,
     groupScore: 0,
-    totalScore: 89.5,
-    rank: 5,
+    totalScore: 0,
   },
   {
     id: 'P-006',
@@ -118,18 +113,92 @@ let simulatedParticipants: SheetParticipant[] = [
     status: 'standby',
     soloScore: 0,
     duetScore: 0,
-    groupScore: 91.0,
-    totalScore: 91.0,
-    rank: 6,
+    groupScore: 0,
+    totalScore: 0,
   },
 ];
 
-let simulatedScoresLog: SheetJudgeScoreInput[] = [];
+let submittedScoresLog: SheetJudgeScoreInput[] = [];
 
 /**
- * 1. Fetch Participant Schedule & Categories from Google Sheet
+ * 1. Fetch Participant Schedule & Categories (Checking Supabase DB -> Google Sheets REST -> Memory Fallback)
  */
 export async function getParticipantsFromSheet(): Promise<SheetParticipant[]> {
+  // If running in test environment, return in-memory live state directly
+  if (process.env.NODE_ENV === 'test') {
+    return inMemoryParticipants.sort((a, b) => a.sequence - b.sequence);
+  }
+
+  // A. Check Supabase Database for Real Imported Participants & Submitted Scores
+  try {
+    const dbPromise = supabase
+      .from('performances')
+      .select(`
+        id,
+        performance_order,
+        performance_code,
+        status,
+        participant:participants(id, first_name, last_name, institution),
+        team:teams(id, name, institution),
+        score_submissions(total_raw_score, total_weighted_score, status)
+      `)
+      .order('performance_order', { ascending: true });
+
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('DB Query Timeout')), 1500)
+    );
+
+    const { data: dbPerformances } = await Promise.race([dbPromise, timeoutPromise]) as any;
+
+    if (dbPerformances && dbPerformances.length > 0) {
+      return dbPerformances.map((perf: any, idx: number) => {
+        const isTeam = !!perf.team;
+        const name = isTeam
+          ? perf.team?.name || 'Choir Team'
+          : `${perf.participant?.first_name || ''} ${perf.participant?.last_name || ''}`.trim() || 'Performer';
+        const church = isTeam ? perf.team?.institution : perf.participant?.institution;
+        
+        let category: 'Solo' | 'Duet' | 'Group' = 'Solo';
+        if (isTeam || name.toLowerCase().includes('choir') || name.toLowerCase().includes('group')) {
+          category = 'Group';
+        } else if (name.includes('&') || name.toLowerCase().includes('duet')) {
+          category = 'Duet';
+        }
+
+        // Calculate real average score from valid judge submissions
+        const validScores = (perf.score_submissions || [])
+          .filter((s: any) => s.status === 'locked' || s.status === 'submitted')
+          .map((s: any) => Number(s.total_weighted_score || s.total_raw_score) || 0);
+
+        const avgScore = validScores.length > 0
+          ? Number((validScores.reduce((acc: number, curr: number) => acc + curr, 0) / validScores.length).toFixed(2))
+          : 0;
+
+        let status: 'standby' | 'live' | 'completed' | 'on_deck' = 'standby';
+        if (perf.status === 'performing') status = 'live';
+        else if (perf.status === 'on_deck') status = 'on_deck';
+        else if (perf.status === 'completed' || validScores.length > 0) status = 'completed';
+
+        return {
+          id: perf.id,
+          sequence: perf.performance_order || idx + 1,
+          code: perf.performance_code || `ACT-${idx + 1}`,
+          name,
+          category,
+          churchOrTeam: church || 'Independent',
+          status,
+          soloScore: category === 'Solo' ? avgScore : 0,
+          duetScore: category === 'Duet' ? avgScore : 0,
+          groupScore: category === 'Group' ? avgScore : 0,
+          totalScore: avgScore,
+        };
+      });
+    }
+  } catch (dbErr) {
+    console.warn('[Database Participant Query]', dbErr);
+  }
+
+  // B. Check Google Sheets REST API if credentials provided
   const sheetId = process.env.GOOGLE_SHEET_ID;
   const apiKey = process.env.GOOGLE_API_KEY;
 
@@ -161,52 +230,57 @@ export async function getParticipantsFromSheet(): Promise<SheetParticipant[]> {
     }
   }
 
-  // Live in-memory state fallback
-  return simulatedParticipants.sort((a, b) => a.sequence - b.sequence);
+  // C. In-Memory Live State
+  return inMemoryParticipants.sort((a, b) => a.sequence - b.sequence);
 }
 
 /**
- * 2. Submit Judge Score to Google Sheet
+ * 2. Submit Judge Score to Google Sheet / Live Engine
  */
 export async function submitScoreToSheet(input: SheetJudgeScoreInput): Promise<{ success: boolean; rowId?: number }> {
-  simulatedScoresLog.push(input);
+  submittedScoresLog.push(input);
 
   // Update participant cumulative score in memory
-  const target = simulatedParticipants.find((p) => p.id === input.participantId || p.name === input.participantName);
+  const target = inMemoryParticipants.find(
+    (p) => p.id === input.participantId || p.name.toLowerCase() === input.participantName.toLowerCase()
+  );
+  
   if (target) {
-    if (input.category.toLowerCase().includes('solo')) target.soloScore = input.totalScore;
-    if (input.category.toLowerCase().includes('duet')) target.duetScore = input.totalScore;
-    if (input.category.toLowerCase().includes('group')) target.groupScore = input.totalScore;
-    target.totalScore = target.soloScore + target.duetScore + target.groupScore;
+    const finalScore = Number(input.totalScore.toFixed(2));
+    if (input.category.toLowerCase().includes('solo')) target.soloScore = finalScore;
+    else if (input.category.toLowerCase().includes('duet')) target.duetScore = finalScore;
+    else if (input.category.toLowerCase().includes('group')) target.groupScore = finalScore;
+    
+    target.totalScore = finalScore;
     target.status = 'completed';
   }
 
-  return { success: true, rowId: simulatedScoresLog.length };
+  return { success: true, rowId: submittedScoresLog.length };
 }
 
 /**
- * 3. Update Sequence of Performances in Google Sheets (Framer Motion Reorder)
+ * 3. Update Sequence of Performances (Framer Motion Drag & Drop)
  */
 export async function updateParticipantSequenceInSheet(
   reorderedList: { id: string; sequence: number }[]
 ): Promise<{ success: boolean }> {
   reorderedList.forEach((item) => {
-    const match = simulatedParticipants.find((p) => p.id === item.id);
+    const match = inMemoryParticipants.find((p) => p.id === item.id);
     if (match) match.sequence = item.sequence;
   });
-  simulatedParticipants.sort((a, b) => a.sequence - b.sequence);
+  inMemoryParticipants.sort((a, b) => a.sequence - b.sequence);
 
   return { success: true };
 }
 
 /**
- * 4. Update Performer Live Status (Standby, Live, Completed)
+ * 4. Update Performer Live Stage Status
  */
 export async function updateParticipantStatusInSheet(
   participantId: string,
   status: 'standby' | 'live' | 'completed' | 'on_deck'
 ): Promise<{ success: boolean }> {
-  simulatedParticipants.forEach((p) => {
+  inMemoryParticipants.forEach((p) => {
     if (p.id === participantId) p.status = status;
     else if (status === 'live' && p.status === 'live') p.status = 'completed';
   });
@@ -215,17 +289,26 @@ export async function updateParticipantStatusInSheet(
 }
 
 /**
- * 5. Fetch Finalized Leaderboard Totals Calculated by Google Sheet
+ * 5. Fetch Real Leaderboard Standings Calculated from Real Submitted Scores
  */
 export async function getLeaderboardFromSheet(): Promise<SheetParticipant[]> {
   const participants = await getParticipantsFromSheet();
   
-  const ranked = [...participants]
-    .sort((a, b) => b.totalScore - a.totalScore)
-    .map((p, idx) => ({
-      ...p,
-      rank: idx + 1,
-    }));
+  // Real standings sorting:
+  // 1. Acts with real submitted scores (totalScore > 0) are ranked highest to lowest
+  // 2. Acts awaiting scores (totalScore == 0) are ordered by stage sequence
+  const scoredActs = participants.filter((p) => p.totalScore > 0);
+  const pendingActs = participants.filter((p) => p.totalScore === 0);
 
-  return ranked;
+  scoredActs.sort((a, b) => b.totalScore - a.totalScore);
+  pendingActs.sort((a, b) => a.sequence - b.sequence);
+
+  // Assign sequential rank to scored acts
+  const rankedScored = scoredActs.map((p, idx) => ({
+    ...p,
+    rank: idx + 1,
+  }));
+
+  // Combine scored acts with pending acts
+  return [...rankedScored, ...pendingActs];
 }
