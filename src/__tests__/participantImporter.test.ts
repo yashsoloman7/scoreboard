@@ -51,9 +51,10 @@ P-301,Charlie,Brown,valid@example.com`;
     expect(regs.length).toBe(1);
     expect(regs[0].churchName).toBe('St. Thomas Cathedral');
     expect(regs[0].soloParticipantName).toBe('Mark Paul');
-    expect(regs[0].duetParticipant1).toBe('Luke & John');
+    expect(regs[0].duetParticipant1).toBe('Luke');
+    expect(regs[0].duetParticipant2).toBe('John');
+    expect(regs[0].duetCombinedName).toBe('Luke & John');
     expect(regs[0].guitarist).toBe('Acoustic Guy');
-    expect(regs[0].octopadDrums).toBe('Drummer Dan');
     expect(regs[0].keyboardist).toBe('Keys Keith');
     expect(regs[0].bestKeyboardist).toBe('Keys Keith');
     expect(regs[0].bestRhythmist).toBe('Drummer Dan');
@@ -66,5 +67,31 @@ P-301,Charlie,Brown,valid@example.com`;
     expect(acts[1].performanceType).toBe('duet');
     expect(acts[1].participantName).toBe('Luke & John');
     expect(acts[2].performanceType).toBe('group');
+  });
+
+  it('correctly pairs 2 duet singers when solo performer sings with second singer', () => {
+    const csvData = `Sno.,Church Name,Solo Name,Duet Name
+1,Bhilai Church,Parina H. George,B. Paulina
+2,Raipur Parish,Pratush Hemrm,Pratush & Ashish
+3,Nagpur Assembly,A. Nageshwar Rao,Y. Kiran Kumar`;
+
+    const regs = parseGoogleFormRegistrations(csvData, 'csv');
+    expect(regs.length).toBe(3);
+
+    // Row 1: Solo + 2nd singer -> Parina H. George & B. Paulina
+    expect(regs[0].duetCombinedName).toBe('Parina H. George & B. Paulina');
+
+    // Row 2: Already has delimiter & -> Pratush & Ashish
+    expect(regs[1].duetCombinedName).toBe('Pratush & Ashish');
+
+    // Row 3: Solo + 2nd singer -> A. Nageshwar Rao & Y. Kiran Kumar
+    expect(regs[2].duetCombinedName).toBe('A. Nageshwar Rao & Y. Kiran Kumar');
+
+    const acts = convertGoogleFormsToCompetitionActs(regs);
+    const duetActs = acts.filter((a) => a.performanceType === 'duet');
+    expect(duetActs.length).toBe(3);
+    expect(duetActs[0].participantName).toBe('Parina H. George & B. Paulina');
+    expect(duetActs[1].participantName).toBe('Pratush & Ashish');
+    expect(duetActs[2].participantName).toBe('A. Nageshwar Rao & Y. Kiran Kumar');
   });
 });

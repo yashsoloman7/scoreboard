@@ -47,13 +47,12 @@ const DEFAULT_TIME_SLOTS: TimeSlotConfig = {
 export async function getEventCriteria(eventId: string): Promise<EventCriteriaConfig> {
   const supabase = await createServerSupabaseClient();
 
-  const { data: comp } = await supabase
-    .from('competitions')
-    .select('id, settings:competition_settings(*)')
-    .eq('id', eventId)
+  const { data: settings } = await supabase
+    .from('competition_settings')
+    .select('*')
+    .eq('competition_id', eventId)
     .maybeSingle();
 
-  const settings = comp?.settings as any;
   const settingsCriteria = settings?.criteria_config;
 
   const timeSlots: TimeSlotConfig = {

@@ -320,8 +320,8 @@ export function GoogleFormSheetImporter({ competitionId, onSuccess }: GoogleForm
                       )}
                     </td>
                     <td className="py-3 px-4">
-                      {reg.duetParticipant1 ? (
-                        <span className="font-semibold text-teal-300">{reg.duetParticipant1}</span>
+                      {reg.duetCombinedName || reg.duetParticipant1 ? (
+                        <span className="font-semibold text-teal-300">{reg.duetCombinedName || reg.duetParticipant1}</span>
                       ) : (
                         <span className="text-slate-600">—</span>
                       )}

@@ -8,26 +8,32 @@ import { revalidatePath } from 'next/cache';
 
 export async function getUsersWithRoles(): Promise<UserProfile[]> {
   const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*, roles:user_roles(role)')
-    .order('full_name', { ascending: true });
+  
+  const [{ data: profiles, error: pError }, { data: roles, error: rError }] = await Promise.all([
+    supabase.from('profiles').select('*').order('full_name', { ascending: true }),
+    supabase.from('user_roles').select('*'),
+  ]);
 
-  if (error) {
-    console.error('Error fetching users:', error);
+  if (pError || !profiles) {
+    console.error('Error fetching profiles:', pError);
     return [];
   }
 
-  return data.map((p) => ({
+  const roleMap = new Map<string, AppRole>();
+  (roles || []).forEach((r: any) => {
+    roleMap.set(r.user_id, r.role as AppRole);
+  });
+
+  return profiles.map((p: any) => ({
     id: p.id,
     email: p.email,
-    fullName: p.full_name,
-    phoneNumber: p.phone_number,
-    avatarUrl: p.avatar_url,
-    isActive: p.is_active,
-    role: (p.roles?.[0]?.role as AppRole) || 'unauthorized',
+    fullName: p.full_name || 'Staff User',
+    phoneNumber: p.phone_number || null,
+    avatarUrl: p.avatar_url || null,
+    isActive: p.is_active ?? true,
+    role: roleMap.get(p.id) || 'unauthorized',
     createdAt: p.created_at,
-    updatedAt: p.updated_at,
+    updatedAt: p.updated_at || p.created_at,
   }));
 }
 

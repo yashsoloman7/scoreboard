@@ -44,6 +44,27 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
   const [rhythmistScore, setRhythmistScore] = useState<number>(0);
   const [guitaristScore, setGuitaristScore] = useState<number>(0);
 
+  // Helper to load Creator-Defined Criteria
+  const loadCriteria = async (targetId: string) => {
+    try {
+      const config = await getEventCriteria(targetId);
+      if (config?.criteria && Array.isArray(config.criteria)) {
+        setCriteriaList(config.criteria);
+        setTotalConfiguredMax(config.totalMaxMarks || 100);
+        setCriteriaScores((prev) => {
+          const nextScores: Record<string, number> = {};
+          config.criteria.forEach((c, idx) => {
+            const key = c.id || `crit-${idx + 1}`;
+            nextScores[key] = prev[key] !== undefined ? prev[key] : 0;
+          });
+          return nextScores;
+        });
+      }
+    } catch (e) {
+      console.error('Failed to load event criteria in JudgePanel:', e);
+    }
+  };
+
   // 1. Initial State, Queue & Creator-Defined Criteria Load
   useEffect(() => {
     async function load() {
@@ -66,20 +87,7 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
 
       if (!targetId) return;
 
-      try {
-        const config = await getEventCriteria(targetId);
-        if (config?.criteria) {
-          setCriteriaList(config.criteria);
-          setTotalConfiguredMax(config.totalMaxMarks || 100);
-          const initialScores: Record<string, number> = {};
-          config.criteria.forEach((c, idx) => {
-            initialScores[c.id || `crit-${idx}`] = 0;
-          });
-          setCriteriaScores(initialScores);
-        }
-      } catch (e) {
-        console.error('Failed to load event criteria:', e);
-      }
+      await loadCriteria(targetId);
 
       const [{ data: st }, { data: pList }] = await Promise.all([
         supabase.from('event_state').select('*').eq('event_id', targetId).maybeSingle(),
@@ -105,12 +113,15 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
     load();
   }, [activeEventId]);
 
-  // 2. Realtime State Sync
+  // 2. Realtime State & Criteria Sync
   useEffect(() => {
     if (!activeEventId) return;
 
     const channel = supabase
       .channel(`judge_state_${activeEventId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'competition_settings', filter: `competition_id=eq.${activeEventId}` }, async () => {
+        await loadCriteria(activeEventId);
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'event_state', filter: `event_id=eq.${activeEventId}` }, async (payload) => {
         const updated = payload.new as any;
         setEventState(updated);

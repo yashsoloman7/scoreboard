@@ -67,7 +67,12 @@ export default function ControlRoomPage() {
   const [scores, setScores] = useState<ScoreRecord[]>([]);
   const [judges, setJudges] = useState<any[]>([]);
 
-  const [timeLeft, setTimeLeft] = useState(300);
+  const [timeSlots, setTimeSlots] = useState<{ solo: number; duet: number; group: number }>({
+    solo: 240,
+    duet: 300,
+    group: 480,
+  });
+  const [timeLeft, setTimeLeft] = useState(240);
   const [isUpdating, setIsUpdating] = useState(false);
 
   // 1. Load Real Live Competitions
@@ -89,11 +94,26 @@ export default function ControlRoomPage() {
     loadComps();
   }, []);
 
-  // 2. Load Acts & State for Selected Competition
+  // Helper to get target duration for an act based on its performance type
+  const getActDuration = useCallback((act?: ParticipantAct | null) => {
+    if (!act) return timeSlots.solo;
+    const type = (act.performance_type || '').toLowerCase();
+    if (type.includes('group') || type.includes('choir') || type.includes('band')) return timeSlots.group;
+    if (type.includes('duet')) return timeSlots.duet;
+    return timeSlots.solo;
+  }, [timeSlots]);
+
+  // 2. Load Acts, Settings & State for Selected Competition
   const loadEventData = useCallback(async () => {
     if (!selectedCompId) return;
 
-    const [{ data: pList }, { data: st }, { data: scList }, { data: jList }] = await Promise.all([
+    const [
+      { data: pList },
+      { data: st },
+      { data: scList },
+      { data: jList },
+      { data: settings }
+    ] = await Promise.all([
       supabase
         .from('participants')
         .select('*')
@@ -105,13 +125,23 @@ export default function ControlRoomPage() {
       supabase.from('event_state').select('*').eq('event_id', selectedCompId).maybeSingle(),
       supabase.from('scores').select('*').eq('event_id', selectedCompId),
       supabase.from('profiles').select('*, roles:user_roles(role)').eq('roles.role', 'judge'),
+      supabase.from('competition_settings').select('*').eq('competition_id', selectedCompId).maybeSingle(),
     ]);
 
-    if (pList) {
+    const loadedSlots = {
+      solo: Number(settings?.solo_duration_seconds || 240),
+      duet: Number(settings?.duet_duration_seconds || 300),
+      group: Number(settings?.group_duration_seconds || 480),
+    };
+    setTimeSlots(loadedSlots);
+
+    if (pList && pList.length > 0) {
       setActs(pList);
       if (st?.active_participant_id) {
         const activeIdx = pList.findIndex((p) => p.id === st.active_participant_id);
-        if (activeIdx !== -1) setCurrentActIndex(activeIdx);
+        if (activeIdx !== -1) {
+          setCurrentActIndex(activeIdx);
+        }
       }
     }
 
@@ -133,6 +163,16 @@ export default function ControlRoomPage() {
 
     const channel = supabase
       .channel(`control_room_${selectedCompId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'competition_settings', filter: `competition_id=eq.${selectedCompId}` }, (payload) => {
+        const updatedSettings = payload.new as any;
+        if (updatedSettings) {
+          setTimeSlots({
+            solo: Number(updatedSettings.solo_duration_seconds || 240),
+            duet: Number(updatedSettings.duet_duration_seconds || 300),
+            group: Number(updatedSettings.group_duration_seconds || 480),
+          });
+        }
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'event_state', filter: `event_id=eq.${selectedCompId}` }, (payload) => {
         const updated = payload.new as any;
         setEventState(updated);
@@ -147,21 +187,28 @@ export default function ControlRoomPage() {
     };
   }, [selectedCompId, loadEventData]);
 
+  const currentAct = acts[currentActIndex] || null;
+  const isLive = eventState?.stage_mode === 'live';
+
   // 4. Tab-Change Resilient Authoritative Wall-Clock Timer
   useEffect(() => {
+    const actDuration = getActDuration(currentAct);
+    const targetDuration = eventState?.timer_duration_seconds || actDuration;
+
     if (eventState?.stage_mode !== 'live' || eventState?.timer_status !== 'running') {
       if (eventState?.timer_duration_seconds) {
         setTimeLeft(eventState.timer_duration_seconds - Math.floor(eventState.timer_elapsed_seconds || 0));
+      } else {
+        setTimeLeft(targetDuration);
       }
       return;
     }
 
     const calcRemaining = () => {
-      if (!eventState?.timer_started_at) return eventState?.timer_duration_seconds || 300;
+      if (!eventState?.timer_started_at) return targetDuration;
       const startedMs = new Date(eventState.timer_started_at).getTime();
       const elapsedSecs = Math.floor((Date.now() - startedMs) / 1000);
-      const totalDur = eventState.timer_duration_seconds || 300;
-      return Math.max(0, totalDur - elapsedSecs);
+      return Math.max(0, targetDuration - elapsedSecs);
     };
 
     setTimeLeft(calcRemaining());
@@ -170,20 +217,21 @@ export default function ControlRoomPage() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [eventState?.stage_mode, eventState?.timer_status, eventState?.timer_started_at, eventState?.timer_duration_seconds]);
-
-  const currentAct = acts[currentActIndex] || null;
-  const isLive = eventState?.stage_mode === 'live';
+  }, [eventState?.stage_mode, eventState?.timer_status, eventState?.timer_started_at, eventState?.timer_duration_seconds, currentAct, getActDuration]);
 
   // 5. Stage State Machine Controls
   const setStageMode = async (mode: 'standby' | 'live' | 'completed', unlockJudges = false) => {
     if (!selectedCompId) return;
     setIsUpdating(true);
+    const actDuration = getActDuration(currentAct);
+    const durationToUse = eventState?.timer_duration_seconds || actDuration;
+
     await supabase.from('event_state').upsert({
       event_id: selectedCompId,
       stage_mode: mode,
       is_judge_input_unlocked: unlockJudges,
       timer_status: mode === 'live' ? 'running' : 'stopped',
+      timer_duration_seconds: durationToUse,
       timer_started_at: mode === 'live' ? new Date().toISOString() : null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'event_id' });
@@ -195,7 +243,8 @@ export default function ControlRoomPage() {
     const target = acts[newIndex];
     setCurrentActIndex(newIndex);
     setIsUpdating(true);
-    setTimeLeft(eventState?.timer_duration_seconds || 300);
+    const targetDuration = getActDuration(target);
+    setTimeLeft(targetDuration);
 
     await supabase.from('event_state').upsert({
       event_id: selectedCompId,
@@ -203,6 +252,7 @@ export default function ControlRoomPage() {
       stage_mode: 'standby',
       is_judge_input_unlocked: false,
       timer_status: 'idle',
+      timer_duration_seconds: targetDuration,
       timer_elapsed_seconds: 0,
       timer_started_at: null,
       current_category: target.performance_type,
@@ -210,6 +260,29 @@ export default function ControlRoomPage() {
     }, { onConflict: 'event_id' });
 
     setIsUpdating(false);
+  };
+
+  const setManualDuration = async (seconds: number) => {
+    if (!selectedCompId) return;
+    const clamped = Math.max(10, seconds);
+    setTimeLeft(clamped);
+    await supabase.from('event_state').upsert({
+      event_id: selectedCompId,
+      timer_duration_seconds: clamped,
+      timer_elapsed_seconds: 0,
+      timer_started_at: isLive ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'event_id' });
+  };
+
+  const adjustTimerMinutes = async (deltaMinutes: number) => {
+    const nextVal = Math.max(10, timeLeft + deltaMinutes * 60);
+    await setManualDuration(nextVal);
+  };
+
+  const resetToCategoryDefault = async () => {
+    const actDuration = getActDuration(currentAct);
+    await setManualDuration(actDuration);
   };
 
   const formatSeconds = (sec: number) => {
@@ -400,6 +473,71 @@ export default function ControlRoomPage() {
                       className="px-6 py-3 rounded-2xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 disabled:opacity-40 flex items-center gap-2 cursor-pointer transition-all"
                     >
                       <CheckCircle2 className="w-4 h-4" /> Mark Completed
+                    </button>
+                  </div>
+
+                  {/* Category Dedicated Presets & Quick Controls */}
+                  <div className="pt-3 border-t border-slate-900 flex flex-wrap items-center justify-center gap-2 text-xs">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mr-1">Category Presets:</span>
+                    <button
+                      type="button"
+                      onClick={() => setManualDuration(timeSlots.solo)}
+                      className={`px-3 py-1.5 rounded-xl font-bold border transition-all cursor-pointer ${
+                        currentAct?.performance_type === 'solo'
+                          ? 'bg-indigo-600/25 border-indigo-500/50 text-indigo-300'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      🎤 Solo ({Math.round(timeSlots.solo / 60)}m)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setManualDuration(timeSlots.duet)}
+                      className={`px-3 py-1.5 rounded-xl font-bold border transition-all cursor-pointer ${
+                        currentAct?.performance_type === 'duet'
+                          ? 'bg-purple-600/25 border-purple-500/50 text-purple-300'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      👥 Duet ({Math.round(timeSlots.duet / 60)}m)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setManualDuration(timeSlots.group)}
+                      className={`px-3 py-1.5 rounded-xl font-bold border transition-all cursor-pointer ${
+                        currentAct?.performance_type === 'group'
+                          ? 'bg-cyan-600/25 border-cyan-500/50 text-cyan-300'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      🏛️ Group ({Math.round(timeSlots.group / 60)}m)
+                    </button>
+
+                    <div className="h-4 w-px bg-slate-800 mx-1"></div>
+
+                    <button
+                      type="button"
+                      onClick={() => adjustTimerMinutes(1)}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white font-mono font-bold cursor-pointer transition-colors"
+                      title="Add 1 Minute"
+                    >
+                      +1m
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustTimerMinutes(-1)}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white font-mono font-bold cursor-pointer transition-colors"
+                      title="Subtract 1 Minute"
+                    >
+                      -1m
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetToCategoryDefault}
+                      className="p-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-amber-400 cursor-pointer transition-colors"
+                      title="Reset to Current Category Duration"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>

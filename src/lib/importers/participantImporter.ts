@@ -156,18 +156,23 @@ function normalizeRowKeys(row: Record<string, unknown>, index = 0): Record<strin
       normalized['lastName'] = parts.slice(1).join(' ') || '';
     }
     // 4. Duet Participants
-    else if (['duetparticipantname1', 'duetparticpantname1', 'duetperformer1', 'duet1', 'duetparticipant1'].includes(lowerKey)) {
+    else if (['duetparticipantname1', 'duetparticpantname1', 'duetperformer1', 'duet1', 'duetparticipant1', 'duetsinger1'].includes(lowerKey)) {
       normalized['duetParticipant1'] = strVal;
-    } else if (['duetparticipantname2', 'duetparticpantname2', 'duetperformer2', 'duet2', 'duetparticipant2'].includes(lowerKey)) {
+    } else if (['duetparticipantname2', 'duetparticpantname2', 'duetperformer2', 'duet2', 'duetparticipant2', 'duetsinger2'].includes(lowerKey)) {
       normalized['duetParticipant2'] = strVal;
-    } else if (['duetname', 'duetparticipantname', 'duet', 'duetpair', 'duetmembers'].includes(lowerKey)) {
-      normalized['duetParticipant1'] = strVal;
-      if (strVal.includes('&') || strVal.toLowerCase().includes(' and ') || strVal.includes('/')) {
-        const parts = strVal.split(/\s*(&|\band\b|\/)\s*/i).filter((p) => p && !['&', 'and', '/'].includes(p.toLowerCase()));
+    } else if (['duetname', 'duetparticipantname', 'duet', 'duetpair', 'duetmembers', 'duetparticipants', 'duetsingers'].includes(lowerKey)) {
+      normalized['rawDuetName'] = strVal;
+      if (/(&|\band\b|\/|,|\+|\n|;)/i.test(strVal)) {
+        const parts = strVal.split(/\s*(?:&|\band\b|\/|,|\+|\n|;)\s*/i).map((s) => s.trim()).filter(Boolean);
         if (parts.length >= 2) {
-          normalized['duetSinger1'] = parts[0].trim();
-          normalized['duetSinger2'] = parts[1].trim();
+          normalized['duetParticipant1'] = parts[0];
+          normalized['duetParticipant2'] = parts[1];
+          normalized['duetCombinedName'] = `${parts[0]} & ${parts[1]}`;
+        } else if (parts.length === 1) {
+          normalized['duetParticipant1'] = parts[0];
         }
+      } else {
+        normalized['duetParticipant1'] = strVal;
       }
     }
     // 5. Leader / Pastor
@@ -397,9 +402,29 @@ export function parseGoogleFormRegistrations(
     const churchName = String(normalized['churchName'] || normalized['teamName'] || `Church ${idx + 1}`).trim();
     if (!churchName) return;
 
-    const d1 = normalized['duetParticipant1'] ? String(normalized['duetParticipant1']).trim() : undefined;
-    const d2 = normalized['duetParticipant2'] ? String(normalized['duetParticipant2']).trim() : undefined;
-    const duetCombined = [d1, d2].filter(Boolean).join(' & ');
+    let d1 = normalized['duetParticipant1'] ? String(normalized['duetParticipant1']).trim() : undefined;
+    let d2 = normalized['duetParticipant2'] ? String(normalized['duetParticipant2']).trim() : undefined;
+    const solo = normalized['soloParticipantName'] ? String(normalized['soloParticipantName']).trim() : undefined;
+
+    // If only one duet name was provided (e.g. "B. Paulina" or "Y. Kiran Kumar") and a solo name is present (e.g. "Parina H. George"):
+    // In church choir registration sheets, the second name is the duet partner singing alongside the solo participant!
+    if (d1 && !d2) {
+      if (/(&|\band\b|\/|,|\+|\n|;)/i.test(d1)) {
+        const parts = d1.split(/\s*(?:&|\band\b|\/|,|\+|\n|;)\s*/i).map((s) => s.trim()).filter(Boolean);
+        if (parts.length >= 2) {
+          d1 = parts[0];
+          d2 = parts[1];
+        }
+      } else if (solo && solo.toLowerCase() !== d1.toLowerCase()) {
+        // Solo singer + Duet partner pair
+        d2 = d1;
+        d1 = solo;
+      }
+    }
+
+    const duetCombined = normalized['duetCombinedName'] 
+      ? String(normalized['duetCombinedName']).trim()
+      : [d1, d2].filter(Boolean).join(' & ');
 
     results.push({
       rowNumber: idx + 2,
