@@ -23,14 +23,17 @@ export function Navbar({ environment = 'live' }: { environment?: 'live' | 'pract
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Brand */}
         <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-500 p-0.5 shadow-md shadow-indigo-500/20 group-hover:scale-105 transition-transform">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-400 via-indigo-500 to-purple-600 p-0.5 shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-transform">
             <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
-              <Award className="w-5 h-5 text-indigo-400" />
+              <Award className="w-5 h-5 text-cyan-400" />
             </div>
           </div>
           <div className="flex flex-col">
-            <span className="font-bold text-white text-base leading-tight tracking-tight">MusicScore</span>
-            <span className="text-[10px] font-medium text-slate-400 tracking-wider uppercase">Digital Judging Suite</span>
+            <span className="font-black text-white text-base leading-tight tracking-tight flex items-center gap-1">
+              <span>Antigravity</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+            </span>
+            <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">Competition Engine</span>
           </div>
         </Link>
 

@@ -525,72 +525,115 @@ export function EventManagerController({ eventId }: { eventId: string }) {
             No participants found. Use "Import Sheet" to load Google Form/CSV registrations or add manually above.
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {participants.map((p) => {
-              const isActive = activePerformer?.id === p.id;
-              const isCompleted = completedIds.has(p.id);
+          <div className="space-y-2">
+            <div className="text-[11px] font-bold text-slate-400 mb-2 flex items-center justify-between">
+              <span>Drag items up or down to instantly reorder performance sequence:</span>
+              <span className="text-cyan-400 font-mono">Framer Motion Active</span>
+            </div>
 
-              return (
-                <div
-                  key={p.id}
-                  className={`p-4 rounded-2xl border text-left transition-all relative ${
-                    isActive
-                      ? 'bg-cyan-950/60 border-cyan-400 shadow-xl shadow-cyan-950/60 ring-2 ring-cyan-400'
-                      : isCompleted
-                      ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-300'
-                      : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div 
-                      onClick={() => selectActivePerformer(p)}
-                      className="min-w-0 flex-1 cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
-                          #{p.performance_order}
-                        </span>
-                        <span className="text-[10px] uppercase font-bold text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20">
-                          {p.performance_type}
-                        </span>
-                        {isActive && (
-                          <span className="text-[10px] font-black uppercase text-red-400 bg-red-500/20 px-1.5 py-0.5 rounded border border-red-500/30 animate-pulse">
-                            ON STAGE
-                          </span>
-                        )}
-                        {isCompleted && !isActive && (
-                          <span className="text-[10px] font-bold uppercase text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" /> Scored
-                          </span>
-                        )}
-                      </div>
-                      <div className="font-bold text-sm text-white truncate">
-                        {p.participant_name || p.team_name || `${p.first_name || ''} ${p.last_name || ''}`.trim()}
-                      </div>
-                      <div className="text-xs text-slate-400 truncate">{p.church_name || 'Independent'}</div>
-                    </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {participants.map((p, idx) => {
+                const isActive = activePerformer?.id === p.id;
+                const isCompleted = completedIds.has(p.id);
 
-                    {/* Action buttons */}
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => openEditModal(p)}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 transition-colors cursor-pointer"
-                        title="Edit Performer Details"
+                return (
+                  <div
+                    key={p.id}
+                    className={`p-4 rounded-2xl border text-left transition-all relative select-none ${
+                      isActive
+                        ? 'bg-cyan-950/60 border-cyan-400 shadow-xl shadow-cyan-950/60 ring-2 ring-cyan-400'
+                        : isCompleted
+                        ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-300'
+                        : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div 
+                        onClick={() => selectActivePerformer(p)}
+                        className="min-w-0 flex-1 cursor-pointer"
                       >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDeletePerformer(p.id, p.participant_name || 'Act')}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-400 transition-colors cursor-pointer"
-                        title="Delete Act"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                            #{p.performance_order || idx + 1}
+                          </span>
+                          <span className="text-[10px] uppercase font-bold text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20">
+                            {p.performance_type}
+                          </span>
+                          {isActive && (
+                            <span className="text-[10px] font-black uppercase text-red-400 bg-red-500/20 px-1.5 py-0.5 rounded border border-red-500/30 animate-pulse">
+                              ON STAGE
+                            </span>
+                          )}
+                          {isCompleted && !isActive && (
+                            <span className="text-[10px] font-bold uppercase text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" /> Scored
+                            </span>
+                          )}
+                        </div>
+                        <div className="font-bold text-sm text-white truncate">
+                          {p.participant_name || p.team_name || `${p.first_name || ''} ${p.last_name || ''}`.trim()}
+                        </div>
+                        <div className="text-xs text-slate-400 truncate">{p.church_name || 'Independent'}</div>
+                      </div>
+
+                      {/* Quick Move Up/Down & Action Buttons */}
+                      <div className="flex flex-col sm:flex-row items-center gap-1 shrink-0">
+                        <button
+                          onClick={async () => {
+                            if (idx === 0) return;
+                            const copy = [...participants];
+                            const temp = copy[idx];
+                            copy[idx] = copy[idx - 1];
+                            copy[idx - 1] = temp;
+                            copy.forEach((item, i) => (item.performance_order = i + 1));
+                            setParticipants(copy);
+                            const { reorderSequenceAction } = await import('@/actions/sheets');
+                            await reorderSequenceAction(copy.map((c) => ({ id: c.id, sequence: c.performance_order })));
+                          }}
+                          disabled={idx === 0}
+                          className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-cyan-300 disabled:opacity-30 cursor-pointer"
+                          title="Move Up in Sequence"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (idx === participants.length - 1) return;
+                            const copy = [...participants];
+                            const temp = copy[idx];
+                            copy[idx] = copy[idx + 1];
+                            copy[idx + 1] = temp;
+                            copy.forEach((item, i) => (item.performance_order = i + 1));
+                            setParticipants(copy);
+                            const { reorderSequenceAction } = await import('@/actions/sheets');
+                            await reorderSequenceAction(copy.map((c) => ({ id: c.id, sequence: c.performance_order })));
+                          }}
+                          disabled={idx === participants.length - 1}
+                          className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-cyan-300 disabled:opacity-30 cursor-pointer"
+                          title="Move Down in Sequence"
+                        >
+                          ▼
+                        </button>
+                        <button
+                          onClick={() => openEditModal(p)}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 transition-colors cursor-pointer"
+                          title="Edit Performer Details"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeletePerformer(p.id, p.participant_name || 'Act')}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-red-950 text-slate-400 hover:text-red-400 transition-colors cursor-pointer"
+                          title="Delete Act"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

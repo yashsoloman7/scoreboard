@@ -242,10 +242,34 @@ export function JudgePanel({ eventId }: JudgePanelProps) {
       deviceFingerprint: typeof window !== 'undefined' ? navigator.userAgent : 'mobile_client',
     });
 
+    try {
+      const { submitJudgeScoreAction } = await import('@/actions/sheets');
+      await submitJudgeScoreAction({
+        participantId: activePerformer.id,
+        participantName: activePerformer.participant_name || activePerformer.team_name || 'Act',
+        category: perfType,
+        judgeEmail: 'judge@antigravity.events',
+        judgeName: 'Official Judge',
+        vocalScore: vocalSubtotal,
+        presentationScore: 0,
+        rhythmScore: instrumentsSubtotal,
+        overallScore: totalScore,
+        totalScore: totalScore,
+        submittedAt: new Date().toISOString(),
+      });
+    } catch (sheetErr) {
+      console.warn('[Google Sheets Submit Warning]', sheetErr);
+    }
+
     if (res.success && res.hashReceipt) {
       setHashReceipt(res.hashReceipt);
       setSubmittedTime(res.submittedAt || new Date().toISOString());
       setSubmissionError(null);
+      // Blind Scoring Security: Immediately clear form inputs to prevent bias
+      setCriteriaScores({});
+      setKeyboardistScore(0);
+      setRhythmistScore(0);
+      setGuitaristScore(0);
     } else {
       setSubmissionError(res.error || 'Failed to submit official score. Ensure live stage is active.');
     }

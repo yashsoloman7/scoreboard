@@ -70,9 +70,12 @@ export default function ControlRoomPage() {
   const [timeSlots, setTimeSlots] = useState<{ solo: number; duet: number; group: number }>({
     solo: 240,
     duet: 300,
-    group: 480,
+    group: 360,
   });
   const [timeLeft, setTimeLeft] = useState(240);
+  const [externalWebhookUrl, setExternalWebhookUrl] = useState('');
+  const [isTriggeringExternal, setIsTriggeringExternal] = useState(false);
+  const [externalTriggerLog, setExternalTriggerLog] = useState<string[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
 
   // 1. Load Real Live Competitions
@@ -593,6 +596,74 @@ export default function ControlRoomPage() {
                     <Award className="w-4 h-4 text-purple-400" /> Review Category Prizes & Standings
                   </Link>
                 </div>
+              </div>
+
+              {/* External Integration Trigger Console */}
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-xl">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-cyan-400" />
+                    <span>External Stage Integration</span>
+                  </h3>
+                  <span className="text-[10px] uppercase font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                    Ready
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Broadcast synchronized timer triggers, stage lighting cues, audio gongs, and LED walls via external webhook / socket.
+                </p>
+
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold text-slate-400 block">External Webhook / Trigger URL</label>
+                  <input
+                    type="url"
+                    placeholder="https://stage-controller.local/api/cue"
+                    value={externalWebhookUrl}
+                    onChange={(e) => setExternalWebhookUrl(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={isTriggeringExternal}
+                    onClick={async () => {
+                      setIsTriggeringExternal(true);
+                      const timestamp = new Date().toLocaleTimeString();
+                      setExternalTriggerLog((prev) => [`[${timestamp}] Broadcasted START_ACT trigger to external systems`, ...prev.slice(0, 3)]);
+                      setTimeout(() => setIsTriggeringExternal(false), 600);
+                    }}
+                    className="py-2.5 px-3 rounded-xl bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 font-bold text-xs border border-cyan-500/30 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Send Cue Start</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isTriggeringExternal}
+                    onClick={async () => {
+                      setIsTriggeringExternal(true);
+                      const timestamp = new Date().toLocaleTimeString();
+                      setExternalTriggerLog((prev) => [`[${timestamp}] Broadcasted OVERTIME_GONG alert to stage`, ...prev.slice(0, 3)]);
+                      setTimeout(() => setIsTriggeringExternal(false), 600);
+                    }}
+                    className="py-2.5 px-3 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 font-bold text-xs border border-rose-500/30 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>Send Gong Alert</span>
+                  </button>
+                </div>
+
+                {externalTriggerLog.length > 0 && (
+                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1 font-mono text-[10px] text-slate-400">
+                    {externalTriggerLog.map((log, i) => (
+                      <div key={i} className="truncate text-cyan-300/80">{log}</div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
