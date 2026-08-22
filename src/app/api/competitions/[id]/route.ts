@@ -1,53 +1,25 @@
 import { NextResponse } from 'next/server';
-import dbConnect from '@/lib/db';
-import Competition from '@/models/Competition';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
+// src/app/api/competitions/[id]/route.ts - Supabase Competition Query Endpoint
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-    await dbConnect();
+  try {
     const { id } = await params;
+    const supabase = await createServerSupabaseClient();
+    const { data: competition, error } = await supabase
+      .from('competitions')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
 
-    try {
-        const competition = await Competition.findById(id);
-        if (!competition) {
-            return NextResponse.json({ error: 'Competition not found' }, { status: 404 });
-        }
-        return NextResponse.json(competition);
-    } catch (error) {
-        return NextResponse.json({ error: 'Failed to fetch competition' }, { status: 500 });
+    if (error || !competition) {
+      return NextResponse.json({ error: 'Competition not found' }, { status: 404 });
     }
-}
-
-export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
-    await dbConnect();
-    const { id } = await params;
-
-    try {
-        const body = await req.json();
-        const updatedCompetition = await Competition.findByIdAndUpdate(id, body, { new: true });
-
-        if (!updatedCompetition) {
-            return NextResponse.json({ error: 'Competition not found' }, { status: 404 });
-        }
-
-        return NextResponse.json(updatedCompetition);
-    } catch (error) {
-        return NextResponse.json({ error: 'Failed to update competition' }, { status: 500 });
-    }
-}
-
-export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-    await dbConnect();
-    const { id } = await params;
-
-    try {
-        const deletedCompetition = await Competition.findByIdAndDelete(id);
-
-        if (!deletedCompetition) {
-            return NextResponse.json({ error: 'Competition not found' }, { status: 404 });
-        }
-
-        return NextResponse.json({ message: 'Competition deleted successfully' });
-    } catch (error) {
-        return NextResponse.json({ error: 'Failed to delete competition' }, { status: 500 });
-    }
+    return NextResponse.json(competition);
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to fetch competition' },
+      { status: 500 }
+    );
+  }
 }

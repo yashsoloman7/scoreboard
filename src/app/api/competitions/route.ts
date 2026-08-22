@@ -1,28 +1,24 @@
 import { NextResponse } from 'next/server';
-import dbConnect from '@/lib/db';
-import Competition from '@/models/Competition';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
+// src/app/api/competitions/route.ts - Supabase-backed Competitions API Endpoint
 export async function GET(req: Request) {
-    await dbConnect();
-    const { searchParams } = new URL(req.url);
-    const showAll = searchParams.get('all') === 'true';
+  try {
+    const supabase = await createServerSupabaseClient();
+    const { data: competitions, error } = await supabase
+      .from('competitions')
+      .select('*')
+      .neq('environment', 'practice')
+      .order('created_at', { ascending: false });
 
-    try {
-        const query = showAll ? {} : { isPublished: true };
-        const competitions = await Competition.find(query).sort({ date: 1 });
-        return NextResponse.json(competitions);
-    } catch (error) {
-        return NextResponse.json({ error: 'Failed to fetch competitions' }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
-}
-
-export async function POST(req: Request) {
-    await dbConnect();
-    try {
-        const body = await req.json();
-        const competition = await Competition.create(body);
-        return NextResponse.json(competition, { status: 201 });
-    } catch (error) {
-        return NextResponse.json({ error: 'Failed to create competition' }, { status: 500 });
-    }
+    return NextResponse.json(competitions || []);
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to fetch competitions' },
+      { status: 500 }
+    );
+  }
 }

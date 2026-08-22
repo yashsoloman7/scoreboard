@@ -1,54 +1,30 @@
 import { NextResponse } from 'next/server';
-import dbConnect from '@/lib/db';
-import Competition from '@/models/Competition';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
+// src/app/api/judge/login/route.ts - Supabase Judge Verification Endpoint
 export async function POST(req: Request) {
-    try {
-        await dbConnect();
-        const body = await req.json();
-        const { competitionId, judgeId, password } = body;
+  try {
+    const body = await req.json();
+    const { email } = body;
+    const supabase = await createServerSupabaseClient();
 
-        if (!competitionId || !judgeId || !password) {
-            return NextResponse.json(
-                { message: 'Competition ID, Judge ID, and Password are required' },
-                { status: 400 }
-            );
-        }
+    if (email) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('email', email.trim().toLowerCase())
+        .maybeSingle();
 
-        const competition = await Competition.findById(competitionId);
-        if (!competition) {
-            return NextResponse.json(
-                { message: 'Competition not found' },
-                { status: 404 }
-            );
-        }
-
-        const judge = competition.judges.find((j: any) => j.id === judgeId);
-        if (!judge) {
-            return NextResponse.json(
-                { message: 'Judge not found' },
-                { status: 404 }
-            );
-        }
-
-        // Direct password comparison for now (in a real app, use hashing here)
-        if (judge.password !== password) {
-            return NextResponse.json(
-                { message: 'Invalid credentials' },
-                { status: 401 }
-            );
-        }
-
-        return NextResponse.json(
-            { message: 'Login successful', judge },
-            { status: 200 }
-        );
-
-    } catch (error) {
-        console.error('Judge login error:', error);
-        return NextResponse.json(
-            { message: 'Internal Server Error' },
-            { status: 500 }
-        );
+      if (profile) {
+        return NextResponse.json({ message: 'Judge profile found', judge: profile }, { status: 200 });
+      }
     }
+
+    return NextResponse.json(
+      { message: 'Please sign in via the universal authentication portal at /auth/login' },
+      { status: 401 }
+    );
+  } catch (error) {
+    return NextResponse.json({ message: 'Internal Server Error' }, { status: 500 });
+  }
 }

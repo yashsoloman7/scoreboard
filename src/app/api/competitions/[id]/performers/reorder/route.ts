@@ -1,25 +1,31 @@
 import { NextResponse } from 'next/server';
-import dbConnect from '@/lib/db';
-import Performer from '@/models/Performer';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
+// src/app/api/competitions/[id]/performers/reorder/route.ts - Supabase Performers Reorder Endpoint
 export async function PUT(req: Request) {
-    await dbConnect();
+  try {
     const body = await req.json();
     const { order } = body;
 
     if (!order || !Array.isArray(order)) {
-        return NextResponse.json({ error: 'Invalid order data' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid order data' }, { status: 400 });
     }
 
-    try {
-        const updates = order.map((item: { _id: string, performanceOrder: number }) => {
-            return Performer.findByIdAndUpdate(item._id, { performanceOrder: item.performanceOrder });
-        });
+    const supabase = await createServerSupabaseClient();
+    const updates = order.map((item: { id?: string; _id?: string; performanceOrder: number }) => {
+      const targetId = item.id || item._id;
+      return supabase
+        .from('participants')
+        .update({ performance_order: item.performanceOrder })
+        .eq('id', targetId);
+    });
 
-        await Promise.all(updates);
-        return NextResponse.json({ message: 'Order updated successfully' });
-    } catch (error) {
-        console.error("Reorder error:", error);
-        return NextResponse.json({ error: 'Failed to update order' }, { status: 500 });
-    }
+    await Promise.all(updates);
+    return NextResponse.json({ message: 'Order updated successfully' });
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to update order' },
+      { status: 500 }
+    );
+  }
 }

@@ -1,41 +1,30 @@
 import { NextResponse } from 'next/server';
-import dbConnect from '@/lib/db';
-import Score from '@/models/Score';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
-// Submit a score
-export async function POST(req: Request) {
-    await dbConnect();
-    try {
-        const body = await req.json();
-        const score = await Score.create(body);
-        return NextResponse.json(score, { status: 201 });
-    } catch (error) {
-        return NextResponse.json({ error: 'Failed to submit score' }, { status: 500 });
-    }
-}
-
-// Get all scores for a competition (e.g., for results page)
+// src/app/api/score/route.ts - Supabase-backed Scores API Endpoint
 export async function GET(req: Request) {
-    await dbConnect();
+  try {
     const { searchParams } = new URL(req.url);
-    const competitionId = searchParams.get('competitionId');
+    const eventId = searchParams.get('competitionId') || searchParams.get('eventId');
 
-    if (!competitionId) {
-        return NextResponse.json({ error: 'Competition ID required' }, { status: 400 });
+    if (!eventId) {
+      return NextResponse.json({ error: 'Competition ID required' }, { status: 400 });
     }
 
-    try {
-        const query: any = { competitionId };
+    const supabase = await createServerSupabaseClient();
+    const { data: scores, error } = await supabase
+      .from('scores')
+      .select('*')
+      .eq('event_id', eventId);
 
-        const judgeId = searchParams.get('judgeId');
-        if (judgeId) query.judgeId = judgeId;
-
-        const performerId = searchParams.get('performerId');
-        if (performerId) query.performerId = performerId;
-
-        const scores = await Score.find(query);
-        return NextResponse.json(scores);
-    } catch (error) {
-        return NextResponse.json({ error: 'Failed to fetch scores' }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
+    return NextResponse.json(scores || []);
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to fetch scores' },
+      { status: 500 }
+    );
+  }
 }
