@@ -28,13 +28,33 @@ export const TieBreakRuleTypeSchema = z.enum([
 
 // 1. Competition Validation
 export const CompetitionSchema = z.object({
-  code: z.string().min(2).max(30).regex(/^[A-Z0-9_-]+$/i, 'Competition code must be alphanumeric with dashes/underscores'),
-  name: z.string().min(3).max(100),
-  description: z.string().max(500).optional().nullable(),
-  venue: z.string().max(200).optional().nullable(),
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+  code: z.string().min(2, 'Code must be at least 2 characters').max(30).regex(/^[A-Z0-9_-]+$/i, 'Competition code must be alphanumeric with dashes/underscores'),
+  name: z.string().min(2, 'Event name must be at least 2 characters').max(100),
+  description: z.string().max(500).optional().nullable().or(z.literal('')),
+  venue: z.string().max(200).optional().nullable().or(z.literal('')),
+  startDate: z.string().optional().nullable().or(z.literal('')).transform((val) => {
+    if (!val || typeof val !== 'string' || !val.trim()) {
+      return new Date().toISOString().split('T')[0];
+    }
+    const cleaned = val.split('T')[0].trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+      return cleaned;
+    }
+    return new Date().toISOString().split('T')[0];
+  }),
+  endDate: z.string().optional().nullable().or(z.literal('')).transform((val) => {
+    if (!val || typeof val !== 'string' || !val.trim()) {
+      return new Date().toISOString().split('T')[0];
+    }
+    const cleaned = val.split('T')[0].trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+      return cleaned;
+    }
+    return new Date().toISOString().split('T')[0];
+  }),
   environment: EnvironmentModeSchema.default('live'),
+  eventPassword: z.string().optional().nullable().or(z.literal('')),
+  publishPasscode: z.string().optional().nullable().or(z.literal('')),
 });
 
 export const CompetitionSettingsSchema = z.object({

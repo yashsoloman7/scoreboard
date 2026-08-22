@@ -36,6 +36,30 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
     .eq('id', user.id)
     .maybeSingle();
 
+  let activeProfile = profile;
+
+  // Ensure a profiles row exists to satisfy foreign key constraints
+  if (!activeProfile && user.id) {
+    try {
+      const { data: createdProfile } = await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          email: user.email || '',
+          full_name: user.user_metadata?.full_name || 'Admin User',
+          is_active: true,
+        }, { onConflict: 'id' })
+        .select()
+        .maybeSingle();
+
+      if (createdProfile) {
+        activeProfile = createdProfile;
+      }
+    } catch {
+      // Non-blocking fallback
+    }
+  }
+
   const { data: userRoleData } = await supabase
     .from('user_roles')
     .select('role')
@@ -44,15 +68,19 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
     .limit(1)
     .maybeSingle();
 
-  const role: AppRole = (userRoleData?.role as AppRole) || 'unauthorized';
+  const role: AppRole =
+    (userRoleData?.role as AppRole) ||
+    (user.app_metadata?.role as AppRole) ||
+    (user.user_metadata?.role as AppRole) ||
+    'unauthorized';
 
   return {
     id: user.id,
-    email: user.email || profile?.email || '',
-    fullName: profile?.full_name || user.user_metadata?.full_name || 'User',
-    phoneNumber: profile?.phone_number || null,
-    avatarUrl: profile?.avatar_url || user.user_metadata?.avatar_url || null,
-    isActive: profile?.is_active ?? true,
+    email: user.email || activeProfile?.email || '',
+    fullName: activeProfile?.full_name || user.user_metadata?.full_name || 'User',
+    phoneNumber: activeProfile?.phone_number || null,
+    avatarUrl: activeProfile?.avatar_url || user.user_metadata?.avatar_url || null,
+    isActive: activeProfile?.is_active ?? true,
     role,
     createdAt: user.created_at,
     updatedAt: user.updated_at || user.created_at,

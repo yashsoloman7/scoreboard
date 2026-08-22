@@ -45,13 +45,14 @@ export default function AdminDashboardPage() {
   // Create Event Modal State with Security Password
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState({
     name: '',
     code: '',
     description: '',
     venue: '',
-    startDate: '',
-    endDate: '',
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date().toISOString().split('T')[0],
     eventPassword: '',
     soloSlateMinutes: 4,
     duetSlateMinutes: 5,
@@ -167,40 +168,46 @@ export default function AdminDashboardPage() {
   const handleCreateEvent = async () => {
     if (!createForm.name.trim() || !createForm.code.trim()) return;
     setIsCreating(true);
+    setCreateError(null);
     try {
+      const todayStr = new Date().toISOString().split('T')[0];
       const newComp = await createCompetition({
         name: createForm.name.trim(),
         code: createForm.code.trim().toUpperCase(),
         description: createForm.description.trim() || undefined,
         venue: createForm.venue.trim() || undefined,
-        startDate: createForm.startDate || undefined,
-        endDate: createForm.endDate || undefined,
+        startDate: createForm.startDate || todayStr,
+        endDate: createForm.endDate || todayStr,
         environment: 'live',
         eventPassword: createForm.eventPassword.trim() || undefined,
       });
 
       if (newComp?.id) {
-        await saveEventCriteria(newComp.id, [
-          { name: 'Technicality & Vocal Precision', maxMarks: 30, description: 'Pitch, intonation, vocal control & tone quality' },
-          { name: 'Presentation & Stage Presence', maxMarks: 30, description: 'Expression, poise, diction, harmony & dynamics' },
-          { name: 'Rhythm, Timing & Musicality', maxMarks: 20, description: 'Tempo stability, groove & rhythmic phrasing' },
-          { name: 'Overall Impact & Artistry', maxMarks: 20, description: 'Interpretation, emotional delivery & overall effect' },
-        ], {
-          soloDurationSeconds: createForm.soloSlateMinutes * 60,
-          duetDurationSeconds: createForm.duetSlateMinutes * 60,
-          groupDurationSeconds: createForm.groupSlateMinutes * 60,
-        });
+        try {
+          await saveEventCriteria(newComp.id, [
+            { name: 'Technicality & Vocal Precision', maxMarks: 30, description: 'Pitch, intonation, vocal control & tone quality' },
+            { name: 'Presentation & Stage Presence', maxMarks: 30, description: 'Expression, poise, diction, harmony & dynamics' },
+            { name: 'Rhythm, Timing & Musicality', maxMarks: 20, description: 'Tempo stability, groove & rhythmic phrasing' },
+            { name: 'Overall Impact & Artistry', maxMarks: 20, description: 'Interpretation, emotional delivery & overall effect' },
+          ], {
+            soloDurationSeconds: createForm.soloSlateMinutes * 60,
+            duetDurationSeconds: createForm.duetSlateMinutes * 60,
+            groupDurationSeconds: createForm.groupSlateMinutes * 60,
+          });
+        } catch (critErr) {
+          console.warn('Initial event criteria setup warning:', critErr);
+        }
       }
 
-      setActionMessage(`Successfully created event "${createForm.name}" with security password protection!`);
+      setActionMessage(`Successfully created event "${createForm.name}"!`);
       setIsCreateOpen(false);
       setCreateForm({
         name: '',
         code: '',
         description: '',
         venue: '',
-        startDate: '',
-        endDate: '',
+        startDate: new Date().toISOString().split('T')[0],
+        endDate: new Date().toISOString().split('T')[0],
         eventPassword: '',
         soloSlateMinutes: 4,
         duetSlateMinutes: 5,
@@ -208,7 +215,9 @@ export default function AdminDashboardPage() {
       });
       await loadStats();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Failed to create event');
+      const msg = err instanceof Error ? err.message : 'Failed to create event';
+      setCreateError(msg);
+      alert(msg);
     } finally {
       setIsCreating(false);
     }
@@ -776,6 +785,12 @@ export default function AdminDashboardPage() {
               </button>
             </div>
 
+            {createError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-xs font-semibold">
+                {createError}
+              </div>
+            )}
+
             <div className="space-y-3 text-xs">
               <div>
                 <label className="block text-slate-400 mb-1 font-bold">Event Name *</label>
@@ -813,6 +828,27 @@ export default function AdminDashboardPage() {
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl text-white font-mono focus:outline-none"
                   placeholder="Set secret password (e.g. ChurchAdmin2026!)"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-bold">Start Date</label>
+                  <input
+                    type="date"
+                    value={createForm.startDate}
+                    onChange={(e) => setCreateForm({ ...createForm, startDate: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 mb-1 font-bold">End Date</label>
+                  <input
+                    type="date"
+                    value={createForm.endDate}
+                    onChange={(e) => setCreateForm({ ...createForm, endDate: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
               </div>
 
               <div>

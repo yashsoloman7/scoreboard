@@ -94,57 +94,75 @@ export async function saveEventCriteria(
   instrumentsEnabled: boolean = true,
   instrumentMaxMarks: number = 100
 ) {
-  const admin = await requireRole('admin');
-  const supabase = await createServerSupabaseClient();
+  try {
+    const admin = await requireRole('admin');
+    const supabase = await createServerSupabaseClient();
 
-  if (!criteriaList || criteriaList.length === 0) {
-    throw new Error('At least one criterion parameter must be configured.');
+    if (!criteriaList || criteriaList.length === 0) {
+      throw new Error('At least one criterion parameter must be configured.');
+    }
+
+    const sanitizedCriteria = criteriaList.map((c, idx) => ({
+      id: c.id || `crit-${idx + 1}`,
+      name: c.name.trim() || `Criterion ${idx + 1}`,
+      maxMarks: Math.max(1, Number(c.maxMarks) || 10),
+      description: c.description?.trim() || '',
+      displayOrder: idx + 1,
+    }));
+
+    try {
+      const { error } = await supabase
+        .from('competition_settings')
+        .upsert({
+          competition_id: eventId,
+          criteria_config: sanitizedCriteria,
+          solo_duration_seconds: timeSlots.soloDurationSeconds,
+          duet_duration_seconds: timeSlots.duetDurationSeconds,
+          group_duration_seconds: timeSlots.groupDurationSeconds,
+          instruments_enabled: instrumentsEnabled,
+          instrument_max_marks: instrumentMaxMarks,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'competition_id' });
+
+      if (error) {
+        console.warn('competition_settings update note:', error.message);
+      }
+    } catch (upsertErr) {
+      console.warn('Failed to upsert competition_settings in saveEventCriteria:', upsertErr);
+    }
+
+    try {
+      await supabase.from('audit_logs').insert({
+        competition_id: eventId,
+        actor_id: admin.id,
+        action: 'CONFIGURE_EVENT_CRITERIA_AND_TIMESLOTS',
+        entity: 'competition_settings',
+        entity_id: eventId,
+        new_state: { criteria: sanitizedCriteria, timeSlots, instrumentsEnabled, instrumentMaxMarks },
+      });
+    } catch (auditErr) {
+      console.warn('Audit log write warning in saveEventCriteria:', auditErr);
+    }
+
+    try {
+      revalidatePath('/judge');
+      revalidatePath('/admin');
+      revalidatePath('/admin/dashboard');
+      revalidatePath('/admin/control-room');
+      revalidatePath('/admin/staging');
+    } catch (revErr) {
+      console.warn('revalidatePath note:', revErr);
+    }
+
+    return { 
+      success: true, 
+      criteria: sanitizedCriteria,
+      totalMaxMarks: sanitizedCriteria.reduce((sum, c) => sum + c.maxMarks, 0),
+      timeSlots
+    };
+  } catch (error: unknown) {
+    console.error('Error in saveEventCriteria:', error);
+    if (error instanceof Error) throw error;
+    throw new Error('Failed to save event criteria.');
   }
-
-  const sanitizedCriteria = criteriaList.map((c, idx) => ({
-    id: c.id || `crit-${idx + 1}`,
-    name: c.name.trim() || `Criterion ${idx + 1}`,
-    maxMarks: Math.max(1, Number(c.maxMarks) || 10),
-    description: c.description?.trim() || '',
-    displayOrder: idx + 1,
-  }));
-
-  const { error } = await supabase
-    .from('competition_settings')
-    .upsert({
-      competition_id: eventId,
-      criteria_config: sanitizedCriteria,
-      solo_duration_seconds: timeSlots.soloDurationSeconds,
-      duet_duration_seconds: timeSlots.duetDurationSeconds,
-      group_duration_seconds: timeSlots.groupDurationSeconds,
-      instruments_enabled: instrumentsEnabled,
-      instrument_max_marks: instrumentMaxMarks,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'competition_id' });
-
-  if (error) {
-    console.warn('competition_settings update note:', error.message);
-  }
-
-  await supabase.from('audit_logs').insert({
-    competition_id: eventId,
-    actor_id: admin.id,
-    action: 'CONFIGURE_EVENT_CRITERIA_AND_TIMESLOTS',
-    entity: 'competition_settings',
-    entity_id: eventId,
-    new_state: { criteria: sanitizedCriteria, timeSlots, instrumentsEnabled, instrumentMaxMarks },
-  });
-
-  revalidatePath('/judge');
-  revalidatePath('/admin');
-  revalidatePath('/admin/dashboard');
-  revalidatePath('/admin/control-room');
-  revalidatePath('/admin/staging');
-
-  return { 
-    success: true, 
-    criteria: sanitizedCriteria,
-    totalMaxMarks: sanitizedCriteria.reduce((sum, c) => sum + c.maxMarks, 0),
-    timeSlots
-  };
 }

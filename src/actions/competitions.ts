@@ -83,132 +83,249 @@ export async function getCompetitionById(id: string): Promise<Competition | null
 }
 
 export async function createCompetition(formData: unknown) {
-  const user = await requireRole('admin');
-  const validated = CompetitionSchema.parse(formData);
-  const supabase = await createServerSupabaseClient();
+  try {
+    const user = await requireRole('admin');
 
-  // Insert competition
-  const { data: comp, error: compError } = await supabase
-    .from('competitions')
-    .insert({
-      code: validated.code.toUpperCase(),
-      name: validated.name,
-      description: validated.description,
-      venue: validated.venue,
-      start_date: validated.startDate,
-      end_date: validated.endDate,
-      environment: validated.environment,
-      status: 'draft',
-      created_by: user.id,
-    })
-    .select()
-    .single();
+    // Parse form with detailed error capture
+    let validated;
+    try {
+      validated = CompetitionSchema.parse(formData);
+    } catch (zodErr: any) {
+      if (zodErr?.errors && Array.isArray(zodErr.errors)) {
+        const errorMessages = zodErr.errors
+          .map((e: any) => `${e.path.join('.') || 'field'}: ${e.message}`)
+          .join(', ');
+        throw new Error(`Invalid event input: ${errorMessages}`);
+      }
+      throw new Error(`Validation failed: ${zodErr?.message || 'Invalid event parameters'}`);
+    }
 
-  if (compError) {
-    throw new Error(`Failed to create competition: ${compError.message}`);
+    const supabase = await createServerSupabaseClient();
+
+    // Ensure profiles record exists for user to satisfy FK
+    try {
+      await supabase.from('profiles').upsert({
+        id: user.id,
+        email: user.email || '',
+        full_name: user.fullName || 'Admin User',
+        is_active: true,
+      }, { onConflict: 'id' });
+    } catch {
+      // Non-blocking profile check
+    }
+
+    // Insert competition
+    const { data: comp, error: compError } = await supabase
+      .from('competitions')
+      .insert({
+        code: validated.code.toUpperCase().trim(),
+        name: validated.name.trim(),
+        description: validated.description?.trim() || null,
+        venue: validated.venue?.trim() || null,
+        start_date: validated.startDate,
+        end_date: validated.endDate,
+        environment: validated.environment || 'live',
+        status: 'draft',
+        created_by: user.id,
+      })
+      .select()
+      .single();
+
+    if (compError) {
+      if (compError.code === '23505' || compError.message?.includes('duplicate key') || compError.message?.includes('unique')) {
+        throw new Error(`Competition code "${validated.code}" already exists. Please choose a unique code.`);
+      }
+      throw new Error(`Failed to create competition: ${compError.message}`);
+    }
+
+    // Insert default settings with event password / publish passcode
+    const rawForm = (typeof formData === 'object' && formData !== null) ? (formData as any) : {};
+    const eventPasscode = rawForm.eventPassword || rawForm.publishPasscode || validated.eventPassword || validated.publishPasscode || null;
+
+    try {
+      const { error: settingsError } = await supabase.from('competition_settings').upsert({
+        competition_id: comp.id,
+        publish_passcode: eventPasscode,
+        allow_multiple_judge_devices: false,
+        require_admin_device_approval: true,
+        auto_lock_score_on_submit: true,
+        default_timer_duration_seconds: 300,
+        warning_threshold_seconds: 30,
+        allow_practice_mode: true,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'competition_id' });
+
+      // If publish_passcode column is not in DB schema yet, fallback to base columns
+      if (settingsError && settingsError.message?.includes('publish_passcode')) {
+        await supabase.from('competition_settings').upsert({
+          competition_id: comp.id,
+          allow_multiple_judge_devices: false,
+          require_admin_device_approval: true,
+          auto_lock_score_on_submit: true,
+          default_timer_duration_seconds: 300,
+          warning_threshold_seconds: 30,
+          allow_practice_mode: true,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'competition_id' });
+      }
+    } catch (e) {
+      console.warn('competition_settings setup warning:', e);
+    }
+
+    // Initialize competition_state safely
+    try {
+      await supabase.from('competition_state').upsert({
+        competition_id: comp.id,
+        is_live_active: false,
+        updated_by: user.id,
+      }, { onConflict: 'competition_id' });
+    } catch (e) {
+      console.warn('competition_state setup warning:', e);
+    }
+
+    // Initialize event_state safely
+    try {
+      await supabase.from('event_state').upsert({
+        event_id: comp.id,
+        stage_mode: 'standby',
+        timer_status: 'idle',
+        current_category: 'solo',
+        updated_by: user.id,
+      }, { onConflict: 'event_id' });
+    } catch (e) {
+      console.warn('event_state setup warning:', e);
+    }
+
+    // Log audit record safely (non-blocking)
+    try {
+      await supabase.from('audit_logs').insert({
+        competition_id: comp.id,
+        actor_id: user.id,
+        action: 'CREATE_COMPETITION',
+        entity: 'competitions',
+        entity_id: comp.id,
+        new_state: comp,
+      });
+    } catch (auditErr) {
+      console.warn('Audit log write warning:', auditErr);
+    }
+
+    try {
+      revalidatePath('/admin');
+      revalidatePath('/admin/dashboard');
+      revalidatePath('/admin/competitions');
+      revalidatePath('/admin/control-room');
+      revalidatePath('/admin/staging');
+    } catch (revErr) {
+      console.warn('revalidatePath note:', revErr);
+    }
+
+    return comp;
+  } catch (error: unknown) {
+    console.error('Server error in createCompetition:', error);
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('An unexpected server error occurred while creating the event.');
   }
-
-  // Insert default settings with event password / publish passcode
-  const rawForm = (typeof formData === 'object' && formData !== null) ? (formData as any) : {};
-  const eventPasscode = rawForm.eventPassword || rawForm.publishPasscode || null;
-
-  await supabase.from('competition_settings').insert({
-    competition_id: comp.id,
-    publish_passcode: eventPasscode,
-  });
-
-  // Initialize competition state
-  await supabase.from('competition_state').insert({
-    competition_id: comp.id,
-    is_live_active: false,
-    updated_by: user.id,
-  });
-
-  // Log audit
-  await supabase.from('audit_logs').insert({
-    competition_id: comp.id,
-    actor_id: user.id,
-    action: 'CREATE_COMPETITION',
-    entity: 'competitions',
-    entity_id: comp.id,
-    new_state: comp,
-  });
-
-  revalidatePath('/admin/competitions');
-  return comp;
 }
 
 export async function updateCompetitionSettings(
   competitionId: string,
   settingsData: unknown
 ) {
-  const user = await requireRole('admin');
-  const validated = CompetitionSettingsSchema.parse(settingsData);
-  const supabase = await createServerSupabaseClient();
+  try {
+    const user = await requireRole('admin');
+    const validated = CompetitionSettingsSchema.parse(settingsData);
+    const supabase = await createServerSupabaseClient();
 
-  const { error } = await supabase
-    .from('competition_settings')
-    .upsert({
-      competition_id: competitionId,
-      allow_multiple_judge_devices: validated.allowMultipleJudgeDevices,
-      require_admin_device_approval: validated.requireAdminDeviceApproval,
-      auto_lock_score_on_submit: validated.autoLockScoreOnSubmit,
-      default_timer_duration_seconds: validated.defaultTimerDurationSeconds,
-      warning_threshold_seconds: validated.warningThresholdSeconds,
-      allow_practice_mode: validated.allowPracticeMode,
-      updated_at: new Date().toISOString(),
-    });
+    const { error } = await supabase
+      .from('competition_settings')
+      .upsert({
+        competition_id: competitionId,
+        allow_multiple_judge_devices: validated.allowMultipleJudgeDevices,
+        require_admin_device_approval: validated.requireAdminDeviceApproval,
+        auto_lock_score_on_submit: validated.autoLockScoreOnSubmit,
+        default_timer_duration_seconds: validated.defaultTimerDurationSeconds,
+        warning_threshold_seconds: validated.warningThresholdSeconds,
+        allow_practice_mode: validated.allowPracticeMode,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'competition_id' });
 
-  if (error) {
-    throw new Error(`Failed to update settings: ${error.message}`);
+    if (error) {
+      throw new Error(`Failed to update settings: ${error.message}`);
+    }
+
+    try {
+      await supabase.from('audit_logs').insert({
+        competition_id: competitionId,
+        actor_id: user.id,
+        action: 'UPDATE_COMPETITION_SETTINGS',
+        entity: 'competition_settings',
+        entity_id: competitionId,
+        new_state: validated,
+      });
+    } catch (auditErr) {
+      console.warn('Audit log error:', auditErr);
+    }
+
+    revalidatePath(`/admin/competitions/${competitionId}`);
+  } catch (error: unknown) {
+    console.error('Error in updateCompetitionSettings:', error);
+    if (error instanceof Error) throw error;
+    throw new Error('Failed to update event settings.');
   }
-
-  await supabase.from('audit_logs').insert({
-    competition_id: competitionId,
-    actor_id: user.id,
-    action: 'UPDATE_COMPETITION_SETTINGS',
-    entity: 'competition_settings',
-    entity_id: competitionId,
-    new_state: validated,
-  });
-
-  revalidatePath(`/admin/competitions/${competitionId}`);
 }
 
 export async function deleteCompetition(competitionId: string) {
-  const user = await requireRole('admin');
-  const supabase = await createServerSupabaseClient();
+  try {
+    const user = await requireRole('admin');
+    const supabase = await createServerSupabaseClient();
 
-  // Fetch competition name for audit
-  const { data: comp } = await supabase
-    .from('competitions')
-    .select('name, code')
-    .eq('id', competitionId)
-    .maybeSingle();
+    // Fetch competition name for audit
+    const { data: comp } = await supabase
+      .from('competitions')
+      .select('name, code')
+      .eq('id', competitionId)
+      .maybeSingle();
 
-  // Delete competition (cascade handles participants, scores, timers, event_state)
-  const { error } = await supabase
-    .from('competitions')
-    .delete()
-    .eq('id', competitionId);
+    // Delete competition (cascade handles participants, scores, timers, event_state)
+    const { error } = await supabase
+      .from('competitions')
+      .delete()
+      .eq('id', competitionId);
 
-  if (error) {
-    throw new Error(`Failed to delete competition: ${error.message}`);
+    if (error) {
+      throw new Error(`Failed to delete competition: ${error.message}`);
+    }
+
+    // Insert audit record safely
+    try {
+      await supabase.from('audit_logs').insert({
+        competition_id: competitionId,
+        actor_id: user.id,
+        action: 'DELETE_COMPETITION',
+        entity: 'competitions',
+        entity_id: competitionId,
+        old_state: comp || { id: competitionId },
+      });
+    } catch (auditErr) {
+      console.warn('Audit log delete warning:', auditErr);
+    }
+
+    try {
+      revalidatePath('/admin/dashboard');
+      revalidatePath('/admin/competitions');
+      revalidatePath('/admin/control-room');
+      revalidatePath('/live');
+    } catch (revErr) {
+      console.warn('revalidatePath note:', revErr);
+    }
+
+    return { success: true };
+  } catch (error: unknown) {
+    console.error('Error in deleteCompetition:', error);
+    if (error instanceof Error) throw error;
+    throw new Error('Failed to delete competition.');
   }
-
-  // Insert audit record
-  await supabase.from('audit_logs').insert({
-    actor_id: user.id,
-    action: 'DELETE_COMPETITION',
-    entity: 'competitions',
-    entity_id: competitionId,
-    old_state: comp || { id: competitionId },
-  });
-
-  revalidatePath('/admin/dashboard');
-  revalidatePath('/admin/competitions');
-  revalidatePath('/admin/control-room');
-  revalidatePath('/live');
-
-  return { success: true };
 }
