@@ -1,10 +1,12 @@
 'use server';
 
 // src/actions/users.ts - Super Admin & Admin User Role Management
+
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { requireRole } from '@/lib/auth/guards';
 import { AppRole, UserProfile } from '@/types';
 import { revalidatePath } from 'next/cache';
+import { MASTER_SUPER_ADMIN_EMAIL } from '@/lib/constants';
 
 export async function getUsersWithRoles(): Promise<UserProfile[]> {
   const supabase = await createServerSupabaseClient();
@@ -24,17 +26,20 @@ export async function getUsersWithRoles(): Promise<UserProfile[]> {
     roleMap.set(r.user_id, r.role as AppRole);
   });
 
-  return profiles.map((p: any) => ({
-    id: p.id,
-    email: p.email,
-    fullName: p.full_name || 'Staff User',
-    phoneNumber: p.phone_number || null,
-    avatarUrl: p.avatar_url || null,
-    isActive: p.is_active ?? true,
-    role: roleMap.get(p.id) || 'unauthorized',
-    createdAt: p.created_at,
-    updatedAt: p.updated_at || p.created_at,
-  }));
+  return profiles.map((p: any) => {
+    const isMaster = p.email?.toLowerCase() === MASTER_SUPER_ADMIN_EMAIL.toLowerCase();
+    return {
+      id: p.id,
+      email: p.email,
+      fullName: isMaster ? 'Master Super Administrator' : (p.full_name || 'Staff User'),
+      phoneNumber: p.phone_number || null,
+      avatarUrl: p.avatar_url || null,
+      isActive: p.is_active ?? true,
+      role: isMaster ? 'super_admin' : (roleMap.get(p.id) || 'unauthorized'),
+      createdAt: p.created_at,
+      updatedAt: p.updated_at || p.created_at,
+    };
+  });
 }
 
 /**
@@ -176,7 +181,7 @@ export async function createUserWithRole(email: string, fullName: string, role: 
 export async function sendWelcomeEmailToUser(
   email: string,
   role: AppRole = 'super_admin',
-  fullName: string = 'CC Church Bhilai Administrator'
+  fullName: string = 'Administrator'
 ) {
   const { sendWelcomeEmail } = await import('@/lib/email/welcomeEmail');
   return await sendWelcomeEmail({
@@ -188,8 +193,8 @@ export async function sendWelcomeEmailToUser(
 
 /**
  * Master Super Admin Bootstrap:
- * Allows the initial system administrator / creator to claim the primary Super Admin role
- * if no Super Admin is currently registered in the database, or automatically checks and elevates.
+ * Designates navgirekanta65@gmail.com as the Master Super Administrator automatically,
+ * or allows the first user to claim Super Admin if no Super Admin exists yet.
  */
 export async function claimInitialSuperAdmin(): Promise<{ success: boolean; message: string; role?: AppRole }> {
   const supabase = await createServerSupabaseClient();
@@ -199,6 +204,40 @@ export async function claimInitialSuperAdmin(): Promise<{ success: boolean; mess
     throw new Error('Authentication required. Please sign in to claim Super Admin access.');
   }
 
+  const userEmail = (user.email || '').toLowerCase().trim();
+  const isTargetMasterAdmin = userEmail === MASTER_SUPER_ADMIN_EMAIL.toLowerCase();
+
+  // Ensure profiles record exists
+  await supabase.from('profiles').upsert({
+    id: user.id,
+    email: user.email!,
+    full_name: isTargetMasterAdmin ? 'Master Super Administrator' : (user.user_metadata?.full_name || user.email?.split('@')[0] || 'Super Administrator'),
+    is_active: true,
+  }, { onConflict: 'id' });
+
+  // If this is the designated Master Super Admin account, grant Super Admin access unconditionally
+  if (isTargetMasterAdmin) {
+    await supabase.from('user_roles').delete().eq('user_id', user.id);
+    const { error: insertError } = await supabase.from('user_roles').insert({
+      user_id: user.id,
+      role: 'super_admin',
+      updated_at: new Date().toISOString(),
+    });
+
+    if (insertError) {
+      console.warn('Super admin insert notice:', insertError.message);
+    }
+
+    revalidatePath('/admin/users');
+    revalidatePath('/admin/dashboard');
+
+    return {
+      success: true,
+      message: `Master Super Administrator access granted to ${MASTER_SUPER_ADMIN_EMAIL}!`,
+      role: 'super_admin',
+    };
+  }
+
   // Check if any active super_admin exists in the system
   const { data: existingSuperAdmins } = await supabase
     .from('user_roles')
@@ -206,14 +245,6 @@ export async function claimInitialSuperAdmin(): Promise<{ success: boolean; mess
     .eq('role', 'super_admin');
 
   const count = existingSuperAdmins?.length || 0;
-
-  // Ensure profiles record exists
-  await supabase.from('profiles').upsert({
-    id: user.id,
-    email: user.email!,
-    full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Super Administrator',
-    is_active: true,
-  }, { onConflict: 'id' });
 
   if (count === 0) {
     // Grant primary super_admin role to the first administrator claiming it
@@ -248,7 +279,7 @@ export async function claimInitialSuperAdmin(): Promise<{ success: boolean; mess
     };
   }
 
-  // If other Super Admins exist and current user is not one, check their assigned role
+  // Check their assigned role
   const { data: userRole } = await supabase
     .from('user_roles')
     .select('role')
@@ -265,7 +296,7 @@ export async function claimInitialSuperAdmin(): Promise<{ success: boolean; mess
 
   return {
     success: false,
-    message: 'A Super Administrator is already registered. Please request role assignment from your Master Admin.',
+    message: `A Super Administrator is registered. Please request role assignment from your Master Administrator (${MASTER_SUPER_ADMIN_EMAIL}).`,
   };
 }
 
@@ -283,3 +314,52 @@ export async function getSuperAdminStatus(): Promise<{ hasSuperAdmin: boolean }>
   return { hasSuperAdmin: (data?.length || 0) > 0 };
 }
 
+/**
+ * Reset Database and preserve only navgirekanta65@gmail.com as Master Super Admin
+ */
+export async function resetDatabaseAndSetMasterAdmin(): Promise<{ success: boolean; message: string }> {
+  const supabase = await createServerSupabaseClient();
+  
+  try {
+    // 1. Clear competition data
+    await supabase.from('scores').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('event_state').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('participants').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('competition_settings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('competitions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('audit_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+
+    // 2. Remove all user roles except navgirekanta65@gmail.com
+    const { data: masterProfile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', MASTER_SUPER_ADMIN_EMAIL.toLowerCase())
+      .maybeSingle();
+
+    if (masterProfile?.id) {
+      await supabase.from('user_roles').delete().neq('user_id', masterProfile.id);
+      await supabase.from('user_roles').upsert({
+        user_id: masterProfile.id,
+        role: 'super_admin',
+        updated_at: new Date().toISOString(),
+      });
+    } else {
+      await supabase.from('user_roles').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    }
+
+    revalidatePath('/admin/dashboard');
+    revalidatePath('/admin/users');
+    revalidatePath('/live');
+    revalidatePath('/admin/staging');
+
+    return {
+      success: true,
+      message: `Database successfully cleared! navgirekanta65@gmail.com is now designated as the Sole Master Super Administrator.`,
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : 'Failed to reset database',
+    };
+  }
+}

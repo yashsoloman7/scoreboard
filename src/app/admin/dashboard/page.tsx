@@ -33,9 +33,13 @@ import {
   Medal,
   KeyRound,
   AlertTriangle,
-  UserCheck
+  UserCheck,
+  Crown,
+  DatabaseZap
 } from 'lucide-react';
 import Link from 'next/link';
+import { resetDatabaseAndSetMasterAdmin } from '@/actions/users';
+import { MASTER_SUPER_ADMIN_EMAIL } from '@/lib/constants';
 
 export default function AdminDashboardPage() {
   const [competitions, setCompetitions] = useState<Competition[]>([]);
@@ -579,6 +583,46 @@ export default function AdminDashboardPage() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Master Super Admin & Clean Database Console */}
+        <div className="rounded-3xl bg-gradient-to-r from-purple-950/40 via-slate-900 to-rose-950/40 border border-purple-500/30 p-6 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-purple-500/20 pb-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Crown className="w-5 h-5 text-amber-400" />
+                <h3 className="font-black text-white text-base">Master Super Admin System Binding</h3>
+                <span className="text-[10px] font-bold text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 font-mono">
+                  {MASTER_SUPER_ADMIN_EMAIL}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                This account is bound as the primary system creator and Master Super Administrator.
+              </p>
+            </div>
+
+            <button
+              onClick={() => {
+                setConfirmDialog({
+                  isOpen: true,
+                  title: 'Clear Database & Set Sole Master Super Admin',
+                  message: `Are you sure you want to clear all competition scores, participants, and event data? This will reset the database and preserve only "${MASTER_SUPER_ADMIN_EMAIL}" as the Master Super Administrator.`,
+                  confirmLabel: 'Yes, Clear All Data & Reset',
+                  variant: 'danger',
+                  action: async () => {
+                    const res = await resetDatabaseAndSetMasterAdmin();
+                    setActionMessage(res.message);
+                    setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+                    await loadStats();
+                  },
+                });
+              }}
+              className="px-4 py-2.5 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 hover:text-rose-200 border border-rose-500/40 font-black text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0"
+            >
+              <Trash2 className="w-4 h-4 text-rose-400" />
+              <span>Clear Database (Keep Master Admin)</span>
+            </button>
+          </div>
         </div>
       </main>
 
